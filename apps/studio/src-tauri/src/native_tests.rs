@@ -33,7 +33,9 @@ pub enum NativeEvent {
 
 pub async fn discover(app: &AppHandle) -> Result<Vec<NativeCase>,String> {
     let executable=process::resolve_native(app,"plusminus_native_tests")?;
-    let mut child=Command::new(executable).arg("--list").stdin(Stdio::null())
+    let mut command=Command::new(executable);
+    crate::process_tree::configure(&mut command);
+    let mut child=command.arg("--list").stdin(Stdio::null())
         .stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true)
         .spawn().map_err(|e|e.to_string())?;
     let stdout=child.stdout.take().ok_or("Native manifest stdout missing")?;
@@ -47,8 +49,7 @@ pub async fn discover(app: &AppHandle) -> Result<Vec<NativeCase>,String> {
     };
     let result=tokio::time::timeout(Duration::from_secs(12),execution).await;
     if !matches!(&result,Ok(Ok(_))){
-        let _=child.start_kill();
-        let _=tokio::time::timeout(Duration::from_secs(2),child.wait()).await;
+        crate::process_tree::terminate(&mut child).await?;
     }
     let (status,bytes,stderr)=result.map_err(|_|"Native manifest discovery timed out".to_string())??;
     if !status.success(){return Err(format!("Native discovery failed: {}",String::from_utf8_lossy(&stderr)));}
@@ -83,7 +84,9 @@ async fn run_single(path:&std::path::Path,case:NativeCase,timeout_sec:u64,
     };
     let start=Instant::now();
     if token.is_cancelled(){return failed(&case,"CANCELED","Canceled before spawn".into(),0.0);}
-    let child=Command::new(path).arg("--run").arg(&case.id)
+    let mut command=Command::new(path);
+    crate::process_tree::configure(&mut command);
+    let child=command.arg("--run").arg(&case.id)
        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
        .kill_on_drop(true).spawn();
     let mut child=match child{Ok(ch)=>ch,Err(e)=>return failed(&case,"ERROR",e.to_string(),0.0)};
@@ -106,8 +109,9 @@ async fn run_single(path:&std::path::Path,case:NativeCase,timeout_sec:u64,
         }
     };
     if outcome.is_err(){
-        let _=child.start_kill();
-        let _=tokio::time::timeout(Duration::from_secs(2),child.wait()).await;
+        if let Err(e)=crate::process_tree::terminate(&mut child).await {
+            return failed(&case,"ERROR",format!("Native child cleanup failed: {e}"),start.elapsed().as_secs_f64()*1000.0);
+        }
     }
     let elapsed=start.elapsed().as_secs_f64()*1000.0;
     let (exit,stdout,stderr)=match outcome{
@@ -167,9 +171,9 @@ pub async fn run_suite(app:AppHandle,job_id:String,cases:Vec<NativeCase>,
         tokio::select!{
             _=token.cancelled()=>{
                 canceled=true;
-                jobs.abort_all();
-                // Aborting drops the wait_with_output future, and
-                // kill_on_drop terminates the individual test process.
+                // Allow each worker to observe the cancellation token and
+                // terminate its process group before its future exits.
+                // abort_all() would drop only the immediate child process.
                 while jobs.join_next().await.is_some(){}
                 break;
             }

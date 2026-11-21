@@ -178,8 +178,9 @@ pub(crate) async fn execute_with_executable(
 )->Result<RunResponse,String>{
     validate_request(&request)?;
     let start = Instant::now();
-    let mut child = Command::new(executable)
-        .arg(request.mode.argv())
+    let mut command=Command::new(executable);
+    crate::process_tree::configure(&mut command);
+    let mut child = command.arg(request.mode.argv())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -206,9 +207,10 @@ pub(crate) async fn execute_with_executable(
             result.map_err(|_| "Runner timed out".to_string()).and_then(|r| r)
         }
     };
-    if outcome.is_err() {
-        let _ = child.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    if let Err(ref reason) = outcome {
+        if let Err(cleanup)=crate::process_tree::terminate(&mut child).await {
+            return Err(format!("{reason}; {cleanup}"));
+        }
     }
     let (status, stdout, stderr) = outcome?;
     let report = decode_report(&stdout, status.code())?;
