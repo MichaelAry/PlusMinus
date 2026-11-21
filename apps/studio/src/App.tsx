@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { DockviewReact, themeDark, type DockviewReadyEvent } from "dockview-react";
 import { native } from "./api/native";
 import { parity } from "./api/parity";
@@ -10,15 +10,29 @@ import { EditorPane } from "./features/editor/EditorPane";
 import { OutputPane } from "./features/output/OutputPane";
 import { TestLab } from "./features/parity/TestLab";
 import { SourceTestsPanel } from "./features/parity/SourceTestsPanel";
-import { HistoryPanel } from "./features/parity/HistoryPanel";
- import { ProfilerPanel } from "./features/parity/ProfilerPanel";
-import { ResourcePanel } from "./features/parity/ResourcePanel";
-import { GraphPanel } from "./features/parity/GraphPanel";
-import { NotebookPanel } from "./features/parity/NotebookPanel";
-import { LanguagePanel } from "./features/parity/LanguagePanel";
-import { GitPanel } from "./features/parity/GitPanel";
+// The chart, graph, notebook and history bundles are downloaded only when their
+// Dockview panel is opened, not on every cold start of the editor.
+const HistoryLazy=lazy(()=>import("./features/parity/HistoryPanel").then(m=>({default:m.HistoryPanel})));
+const ProfilerLazy=lazy(()=>import("./features/parity/ProfilerPanel").then(m=>({default:m.ProfilerPanel})));
+const ResourcesLazy=lazy(()=>import("./features/parity/ResourcePanel").then(m=>({default:m.ResourcePanel})));
+const GraphLazy=lazy(()=>import("./features/parity/GraphPanel").then(m=>({default:m.GraphPanel})));
+const NotebookLazy=lazy(()=>import("./features/parity/NotebookPanel").then(m=>({default:m.NotebookPanel})));
+const LanguageLazy=lazy(()=>import("./features/parity/LanguagePanel").then(m=>({default:m.LanguagePanel})));
+const GitLazy=lazy(()=>import("./features/parity/GitPanel").then(m=>({default:m.GitPanel})));
+const deferred=(Component:React.LazyExoticComponent<()=>React.ReactElement>)=>
+  function DeferredPanel(){
+    return <Suspense fallback={<div className="empty-state" role="status">Loading panel…</div>}>
+      <Component/>
+    </Suspense>;
+  };
+const HistoryPanel=deferred(HistoryLazy),ProfilerPanel=deferred(ProfilerLazy);
+const ResourcePanel=deferred(ResourcesLazy),GraphPanel=deferred(GraphLazy);
+const NotebookPanel=deferred(NotebookLazy),LanguagePanel=deferred(LanguageLazy);
+const GitPanel=deferred(GitLazy);
 import "./features/parity/ParityStyle.css";
 
+const MemoDockview=memo(({onReady}:{onReady:(event:DockviewReadyEvent)=>void})=>
+  <DockviewReact components={panels} onReady={onReady} theme={themeDark}/>);
 const panels = {
   editor: EditorPane, results: OutputPane, tests: TestLab, sourcetests: SourceTestsPanel, history: HistoryPanel,
   profiler: ProfilerPanel, resources: ResourcePanel, graphs: GraphPanel, notebook: NotebookPanel,
@@ -302,7 +316,7 @@ export default function App() {
         <div className="workspace-header"><span>RESEARCH WORKBENCH</span>
           <span className="workspace-breadcrumb">{active?.path||"Untitled.pm"}</span>
           <span className="workspace-hint">Ctrl+Shift+P / COMMAND PALETTE</span></div>
-        <div className="dock-host"><DockviewReact components={panels} onReady={onDockReady} theme={themeDark}/></div>
+        <div className="dock-host"><MemoDockview onReady={onDockReady}/></div>
       </main>
     </div>
     <footer className="statusbar"><span className="status-indicator">●</span><span>{message}</span>
