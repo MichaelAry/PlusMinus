@@ -39,6 +39,7 @@ from highlighting import CppHighlighter
 from source_diagnostics import analyze_diagnostics
 from flow_analysis import bytecode_flow, call_graph
 from graph_view import GraphView
+from git_view import GitPanel
 from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
 
@@ -784,18 +785,35 @@ class Studio(QMainWindow):
 
     def make_history(self):
         page_widget, layout = page('History & Reports',
-            'Persistent execution data · comparisons · portable exports')
+            'Persistent executions · native C++ sessions · local Git changes')
+        tabs = QTabWidget()
+        runs = QWidget()
+        run_layout = QVBoxLayout(runs)
         actions = QHBoxLayout()
         self.history_status = label('Loading history...',style='muted')
         actions.addWidget(self.history_status,1)
         actions.addWidget(button('Refresh', self.refresh_history))
         actions.addWidget(button('Export CSV', lambda: self.export_history('csv')))
         actions.addWidget(button('Export JSON', lambda: self.export_history('json')))
-        layout.addLayout(actions)
-        frame, col = panel()
-        self.history_table = table(['UTC timestamp', 'Category', 'Action', 'Result', 'Wall ms', 'SHA-256'])
-        col.addWidget(self.history_table)
-        layout.addWidget(frame,1)
+        run_layout.addLayout(actions)
+        self.history_table = table(['UTC timestamp','Category','Action',
+                                    'Result','Wall ms','SHA-256'])
+        run_layout.addWidget(self.history_table,1)
+        tabs.addTab(runs,'Program history')
+        native = QWidget()
+        native_layout = QVBoxLayout(native)
+        self.native_history_table = table(['Timestamp','Suite','Commit','Passed',
+                                           'Failed / Skipped','Total time (ms)'])
+        native_layout.addWidget(self.native_history_table,1)
+        self.native_pass_chart = Plot('C++ test pass-rate by session  /  %')
+        native_layout.addWidget(self.native_pass_chart)
+        self.native_wall_chart = Plot('C++ test suite total time  /  ms')
+        native_layout.addWidget(self.native_wall_chart)
+        tabs.addTab(native,'C++ test sessions')
+        self.git_panel = GitPanel(ROOT)
+        tabs.addTab(self.git_panel,'Local Git')
+        layout.addWidget(tabs,1)
+        self.history_sections = tabs
         return page_widget
 
     def make_analysis(self):
@@ -1560,6 +1578,22 @@ class Studio(QMainWindow):
         self.history_status.setText(f'{len(history)} latest records · SQLite: {self.history.path}')
         times = [x['elapsed_ms'] for x in reversed(history) if x['category'] in ('Run','Profile')]
         self.duration_chart.set_series([('Wall ms',times[-100:],COLORS['accent'])])
+        sessions = self.native_history.recent(25)
+        rows = []
+        rate, wall = [], []
+        for entry in sessions:
+            results = list(self.native_history.results(entry['id']).values())
+            passed = sum(x['status']=='PASS' for x in results)
+            total = len(results)
+            rows.append((entry['timestamp'][:19],entry['label'],entry['git_sha'][:8],
+                         f'{passed}/{total}',str(total-passed),f"{entry['total_ms']:.1f}"))
+            rate.append(100*passed/max(1,total))
+            wall.append(entry['total_ms'])
+        fill_table(self.native_history_table,rows)
+        self.native_pass_chart.set_series([
+            ('Passing %',list(reversed(rate)),COLORS['good'])])
+        self.native_wall_chart.set_series([
+            ('Duration ms',list(reversed(wall)),COLORS['accent'])])
 
     def export_history(self, fmt):
         filename, _ = QFileDialog.getSaveFileName(self,'Export execution history',
