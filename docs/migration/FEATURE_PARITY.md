@@ -44,3 +44,7 @@ execution must substantiate DONE. Do not invent measurements or CI results.
 - [ ] Unknown metrics are explicitly marked "not measured".
 - [ ] Cancel and timeout stop the process (no orphaned process).
 - [ ] Unmodified C++ sources and CMake verified with git diff.
+
+## Stage 2 implementation status
+
+Detailed evidence: docs/migration/STAGE2_STATUS.md. Stage 2 is a separate Draft PR until CI and real GUI parity checks are complete. C++/Qt remain unchanged. Stage 1 CODE status is not an acceptance claim for Stage 2.

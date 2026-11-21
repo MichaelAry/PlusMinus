@@ -116,9 +116,9 @@ export function NotebookPanel(){
     const cells=[...n.cells];[cells[index],cells[to]]=[cells[to],cells[index]];
     update({...n,cells});setSelected(to);
   };
-  const run=async(index:number,next:boolean)=>{
-    const snapshot=current.current;if(!snapshot)return;
-    const cell=snapshot.cells[index];if(cell?.cell_type!=="code"||activeJob.current)return;
+  const run=async(index:number,next:boolean):Promise<boolean>=>{
+    const snapshot=current.current;if(!snapshot)return false;
+    const cell=snapshot.cells[index];if(cell?.cell_type!=="code"||activeJob.current||!sourceText(cell.source).trim())return false;
     const source=sourceText(cell.source),job=freshJobId();
     activeJob.current=job;setRunning(job);setError("");
     try{
@@ -131,15 +131,28 @@ export function NotebookPanel(){
       if(latest&&actualIndex>=0){
         let updated=withCell(latest,actualIndex,c=>({...c,execution_count:(c.execution_count??0)+1,
           outputs:output,metadata:{...c.metadata,plusminus:{execution_mode:"isolated",metrics:report.report.metrics}}}));
-        if(next&&actualIndex===updated.cells.length-1&&sourceText(updated.cells[actualIndex].source).trim()){
+        const hasLaterCode=updated.cells.slice(actualIndex+1).some(c=>c.cell_type==="code");
+        if(!hasLaterCode){
           updated={...updated,cells:[...updated.cells,makeCell()]};
         }
-        update(updated);setStale(s=>({...s,[cell.id]:false}));
+        update(updated);
+        const changedDuringExecution=sourceText(latest.cells[actualIndex].source)!==source;
+        setStale(s=>({...s,[cell.id]:changedDuringExecution}));
         if(next){setSelected(Math.min(actualIndex+1,updated.cells.length-1));setVisibleCount(v=>Math.max(v,actualIndex+2));}
       }
       setMessage(report.report.ok?"Cell executed in isolated process":"Native execution returned error");
-    }catch(e){setError(String(e));}
+      return report.report.ok;
+    }catch(e){setError(String(e));return false;}
     finally{activeJob.current=null;setRunning(null);}
+  };
+  const runAll=async()=>{
+    const queue=(current.current?.cells??[]).filter(c=>c.cell_type==="code"&&sourceText(c.source).trim()).map(c=>c.id);
+    for(const id of queue){
+      const index=current.current?.cells.findIndex(c=>c.id===id)??-1;
+      if(index<0)continue;
+      const success=await run(index,false);
+      if(!success)break;
+    }
   };
   const stop=async()=>{
     if(activeJob.current)await parity.cancel(activeJob.current).catch(e=>setError(String(e)));
@@ -154,6 +167,7 @@ export function NotebookPanel(){
       <button onClick={()=>void create()}>New notebook</button>
       <button disabled={!notebook||!dirty} onClick={()=>void save()}>Save {dirty?"●":""}</button>
       <button disabled={!notebook} onClick={()=>add("code")}>+ Code</button>
+      <button disabled={!notebook||!!running} onClick={()=>void runAll()}>Run all</button>
       <button disabled={!notebook} onClick={()=>add("markdown")}>+ Markdown</button>
       <button disabled={!running} onClick={()=>void stop()}>Stop</button>
     </div>

@@ -54,3 +54,14 @@ Test Orchestrator will add typed channels for test progress and bounded
 concurrency; SQLite/read-only history; source rebuild operations; notebook
 file round-trip. This is a Rust/application-level extension, not a claim
 that the current C++ binary can accept JSON-RPC or live debug commands.
+
+## Stage 2 additions (Rust/Tauri, not new C++ commands)
+
+- list_native_tests / start_native_suite (jobId, testIds, label, onEvent Channel): independent native C++ test worker processes, bounded concurrency two, progress and cancel_run using the common active-jobs registry.
+- history_overview / recent_runs / native_sessions / session_results / set_native_baseline / compare_native_sessions: read/write studio-v5.db. Original studio.db is opened read-only solely for SQLite Backup API migration.
+- open_workspace_document / save_workspace_document / create_notebook: validated UTF-8 notebook v4 or limited checked-out C++ source. Outside user-selected workspace and symlink traversal rejected.
+- git_summary: read-only fixed Git commands; language_targets / rebuild_native / native_source_stale: fixed source anchors and explicit CMake rebuilding.
+- list_user_tests / save_user_tests / import_user_tests / export_user_tests: validated user test cases, optimistic digest, original user_tests.json left unchanged; copied into user_tests-v5.json.
+- resource_snapshot: observed host Rust process RSS/CPU only. The WebView and C++ child-process metrics are not included in this sample.
+
+No public shell command is granted to JavaScript, no native VM live stepping, no persistent cross-cell kernel and no genuine structured AST output.

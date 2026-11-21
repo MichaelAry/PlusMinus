@@ -56,3 +56,13 @@ workspace path validation and restricted executable selection.
 - Installed package smoke testing on actual OS desktops remains a gate.
 
 See docs/migration/ for the audited baseline, IPC rules and remaining stages.
+
+## Stage 2 research panels (work in progress)
+
+The activity rail and Ctrl+Shift+P command palette open Test Lab (native C++ tests and regression history), Source Tests (Studio 4 built-ins and copied user cases), Notebook, Profiler/Resource graphs, Compiler Explorer (bytecode CFG and heuristic call graph), Git Inspector and Language Internals. Dockview layouts are saved locally; Monaco can be split into two panels with shared document models.
+
+The first Stage 2 launch copies the legacy SQLite database into ~/.plusminus/studio-v5.db through SQLite Backup API; it never migrates by overwriting the original. User test JSON definitions are likewise copied to ~/.plusminus/user_tests-v5.json, leaving the original untouched. Read-only Qt portable preferences can be exported with Python and PySide6 using scripts/export-studio4-settings.py; window geometry bytes cannot migrate to Dockview.
+
+Notebooks are nbformat v4 and isolated per cell, without shared VM state. Source changes are tracked for C++ rebuilds; any failed rebuild leaves native execution stale. Use a source checkout for Language Internals; packaged binaries need not include C++ sources.
+
+**Stage 2 is not approved for final cutover yet.** Follow docs/migration/STAGE2_STATUS.md for exact pending feature-parity and desktop smoke criteria. The original Qt application remains usable.

@@ -17,14 +17,15 @@ BLOCKED = absent or requires prohibited changes to original C++ sources.
 | Runs, sessions, baselines, comparison | PARTIAL | history.rs, HistoryPanel.tsx | Older-session comparisons, metadata |
 | Monaco multi-document split editor | PARTIAL | App.tsx, EditorPane.tsx | Split currently shares globally selected document |
 | Portable Qt settings export | PARTIAL | scripts/export-studio4-settings.py | Test in actual Qt environment, no native dock layout bytes |
-| Notebook v4 cells/Markdown/isolated execution | PARTIAL | NotebookPanel.tsx, model/notebook.ts | Real file round trips; large notebooks |
-| Native opcode metrics and benchmark | PARTIAL | ProfilerPanel.tsx | CPU/RSS telemetry not integrated |
+| Notebook v4 cells/Markdown/isolated execution | PARTIAL | NotebookPanel.tsx, model/notebook.ts | Run all, stale-output handling added; real file round trips pending |
+| Native opcode metrics and benchmark | PARTIAL | ProfilerPanel.tsx | Child CPU/RSS telemetry not integrated |
 | Bytecode CFG and source heuristic call graph | PARTIAL | model/graphs.ts, GraphPanel.tsx | No structured native AST |
 | Git read-only inspector | PARTIAL | git_view.rs and GitPanel.tsx | No source control write actions |
 | Language C++ source navigation/rebuild | PARTIAL | language.rs and LanguagePanel.tsx | Full symbol map and build invalidation checks |
 | Command palette + saved Dockview layout | PARTIAL | App.tsx | UI smoke and keyboard checks |
-| User test JSON import/export | BLOCKED | Old Qt feature preserved | Not ported yet |
-| Lexical live diagnostics and markers | BLOCKED | Old Qt feature preserved | Not ported yet |
+| Rust backend CPU/RSS graphs | PARTIAL | resources.rs; ResourcePanel.tsx | WebView and VM child processes are not counted |
+| User test JSON import/export | PARTIAL | user_tests.rs; SourceTestsPanel.tsx | Run full Qt fixture and UI import/export smoke |
+| Lexical live diagnostics and markers | PARTIAL | model/sourceDiagnostics.ts; EditorPane.tsx | Compare markers to Qt and validate in UI |
 | VM breakpoints/step | BLOCKED | One-shot original runner | Requires C++ API changes |
 | Persistent notebook kernel | BLOCKED | One-shot original runner | Requires C++ API changes |
 

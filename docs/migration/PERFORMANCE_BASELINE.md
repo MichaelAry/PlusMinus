@@ -30,3 +30,7 @@ Measurement protocol for Stage 3:
 
 Core language performance should not change when identical native binaries
 are used; wrapper start/IPC/telemetry overhead remains to be measured.
+
+## Stage 2 instrumentation availability
+
+The Resources panel can sample Tauri/Rust backend CPU and RSS from the operating system; these are real process measurements but do not include the WebView renderer or native C++ worker. The Profiler panel graphs runner wall times and C++-reported opcode/VM metrics from actual executions. No cross-platform comparative measurements have been performed in this migration session and no baseline numbers are claimed.
