@@ -50,6 +50,7 @@ class LanguageSourceWindow(QMainWindow):
         self.current_path: Path | None = None
         self.loaded_text = ''
         self.loaded_bytes = b''
+        self.line_ending = '\n'
         self.keyword = 'if'
         self.targets = ()
         self.setWindowFlag(Qt.WindowType.Window, True)
@@ -181,9 +182,12 @@ class LanguageSourceWindow(QMainWindow):
                 QMessageBox.warning(self, 'Read error', str(exc))
                 return
             self.current_path = path
-            self.loaded_text = contents
+            # Qt normalizes CRLF to LF. A pristine Windows checkout must
+            # not be marked dirty merely because of newline normalization.
+            self.line_ending = '\r\n' if b'\r\n' in raw else ('\r' if b'\r' in raw else '\n')
+            self.loaded_text = contents.replace('\r\n', '\n').replace('\r', '\n')
             self.loaded_bytes = raw
-            self.editor.setPlainText(contents)
+            self.editor.setPlainText(self.loaded_text)
         offset = self.editor.toPlainText().find(target.anchor)
         if offset < 0:
             self.info.setText(f'C++ source anchor is not present in edited text: {target.anchor}')
@@ -214,7 +218,7 @@ class LanguageSourceWindow(QMainWindow):
             backups.mkdir(exist_ok=True)
             shutil.copy2(path, backups/(path.name+'.bak'))
             bom = b'\xef\xbb\xbf' if self.loaded_bytes.startswith(b'\xef\xbb\xbf') else b''
-            new_bytes = bom+self.editor.toPlainText().encode('utf-8')
+            new_bytes = bom + self.editor.toPlainText().replace('\n', self.line_ending).encode('utf-8')
             mode = path.stat().st_mode
             handle, temporary = tempfile.mkstemp(prefix='.plusminus-',suffix='.tmp',dir=str(path.parent))
             try:

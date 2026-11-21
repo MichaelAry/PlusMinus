@@ -209,7 +209,7 @@ def build_runner(*, install: bool, agree: bool, rebuild: bool) -> Path:
     cmake = find_cmake()
     if cmake is None:
         raise LaunchError("CMake cannot be found after installation.")
-    configure = [cmake, "-S", str(ROOT), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"]
+    configure = [cmake, "-S", str(IDE), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"]
     # CMake's default generator chooses Visual Studio when available on Windows,
     # and a platform-native Make/Ninja generator on Linux/macOS.
     run(configure)

@@ -59,15 +59,32 @@ jobs:
           QT_QPA_PLATFORM=offscreen .venv/bin/python tools/smoke_qt.py
           QT_QPA_PLATFORM=offscreen .venv/bin/python -c 'from PySide6.QtWidgets import QApplication; app=QApplication([]); print("Qt OK")'
 
-      - name: Unit and interpreter tests (Windows/macOS)
+      - name: C++ CTest (Windows/macOS)
         if: runner.os != 'Linux'
+        timeout-minutes: 5
+        run: ctest --test-dir ide/build -C Release --output-on-failure
+
+      - name: Python runner and module tests (Windows/macOS)
+        if: runner.os != 'Linux'
+        timeout-minutes: 5
         run: |
-          ctest --test-dir ide/build -C Release --output-on-failure
           python ide/smoke_test.py
           python -m unittest discover -s tools -p "test_*.py"
-          python -m pip install -r ide/requirements.txt pyinstaller==6.16.0
-          python ide/studio_qt.py --self-test
-          python tools/smoke_qt.py
+
+      - name: Install GUI dependencies (Windows/macOS)
+        if: runner.os != 'Linux'
+        timeout-minutes: 15
+        run: python -m pip install -r ide/requirements.txt pyinstaller==6.16.0
+
+      - name: Qt backend self-test (Windows/macOS)
+        if: runner.os != 'Linux'
+        timeout-minutes: 5
+        run: python -u ide/studio_qt.py --self-test
+
+      - name: Qt window navigation smoke (Windows/macOS)
+        if: runner.os != 'Linux'
+        timeout-minutes: 5
+        run: python -u tools/smoke_qt.py
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
