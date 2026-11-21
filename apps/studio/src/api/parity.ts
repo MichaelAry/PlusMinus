@@ -68,7 +68,11 @@ export interface UserCase {
   expect_ok:boolean;timeout:number;
 }
 export interface UserBundle {cases:UserCase[];revision:string}
+export interface ResourceSnapshot {
+  process:string;pid:number;rss_mb:number;cpu_percent:number|null;
+}
 export const parity = {
+  resources:()=>invoke<ResourceSnapshot>("resource_snapshot"),
   userTests:()=>invoke<UserBundle>("list_user_tests"),
   saveUserTests:(cases:UserCase[],expected:string)=>invoke<UserBundle>("save_user_tests",{cases,expected}),
   importUserTests:(expected:string)=>invoke<UserBundle>("import_user_tests",{expected}),

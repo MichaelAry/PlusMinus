@@ -9,7 +9,8 @@ import { OutputPane } from "./features/output/OutputPane";
 import { TestLab } from "./features/parity/TestLab";
 import { SourceTestsPanel } from "./features/parity/SourceTestsPanel";
 import { HistoryPanel } from "./features/parity/HistoryPanel";
-import { ProfilerPanel } from "./features/parity/ProfilerPanel";
+ import { ProfilerPanel } from "./features/parity/ProfilerPanel";
+import { ResourcePanel } from "./features/parity/ResourcePanel";
 import { GraphPanel } from "./features/parity/GraphPanel";
 import { NotebookPanel } from "./features/parity/NotebookPanel";
 import { LanguagePanel } from "./features/parity/LanguagePanel";
@@ -18,20 +19,21 @@ import "./features/parity/ParityStyle.css";
 
 const panels = {
   editor: EditorPane, results: OutputPane, tests: TestLab, sourcetests: SourceTestsPanel, history: HistoryPanel,
-  profiler: ProfilerPanel, graphs: GraphPanel, notebook: NotebookPanel,
+  profiler: ProfilerPanel, resources: ResourcePanel, graphs: GraphPanel, notebook: NotebookPanel,
   language: LanguagePanel, git: GitPanel,
 };
 type PanelName = keyof typeof panels;
 const modes: RunMode[] = ["run","compile","profile","trace"];
 const panelTitles:Record<PanelName,string> = {
   editor:"Editor",results:"Results",tests:"Native Test Lab",sourcetests:"Source Tests",history:"History",
-  profiler:"Profiler",graphs:"Compiler Explorer",notebook:"Notebooks",
+  profiler:"Profiler",resources:"Resources",graphs:"Compiler Explorer",notebook:"Notebooks",
   language:"Language Internals",git:"Git Inspector",
 };
 const paletteCommands:{label:string;id:PanelName}[] = [
   {label:"Show code editor",id:"editor"},{label:"Open Native Test Lab",id:"tests"},
   {label:"Open history and baseline comparison",id:"history"},
   {label:"Open performance profiler",id:"profiler"},
+  {label:"Open measured resource graphs",id:"resources"},
   {label:"Open compiler graphs",id:"graphs"},
   {label:"Open isolated notebooks",id:"notebook"},
   {label:"Browse C++ language implementation",id:"language"},
@@ -214,9 +216,9 @@ export default function App() {
     </header>
     <div className="main-area">
       <aside className="activity-rail" aria-label="Workspace navigation">
-        {(["editor","tests","sourcetests","notebook","profiler","graphs","history","language","git"] as PanelName[]).map((n,i)=>
+        {(["editor","tests","sourcetests","notebook","profiler","resources","graphs","history","language","git"] as PanelName[]).map((n,i)=>
           <button key={n} title={panelTitles[n]} aria-label={panelTitles[n]} onClick={()=>showPanel(n)}>
-            {["⌘","✓","≡","▤","◫","⌁","◷","✥","⑂"][i]}</button>)}
+            {["⌘","✓","≡","▤","◫","▥","⌁","◷","✥","⑂"][i]}</button>)}
       </aside>
       <aside className="explorer">
         <div className="pane-label"><span>EXPLORER</span><button onClick={()=>void refresh()} disabled={!workspace}>↻</button></div>

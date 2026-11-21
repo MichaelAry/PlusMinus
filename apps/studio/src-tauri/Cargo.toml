@@ -23,3 +23,5 @@ sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 dirs = "6"
 walkdir = "2.5"
+
+sysinfo = "=0.38.4"

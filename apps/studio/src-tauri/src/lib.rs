@@ -6,6 +6,7 @@ mod extra_files;
 mod git_view;
 mod language;
 mod user_tests;
+mod resources;
 
 use std::{collections::HashMap, path::PathBuf, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
 use serde_json::Value;
@@ -19,6 +20,7 @@ pub(crate) struct StudioState {
     pub(crate) root: Mutex<Option<PathBuf>>,
     pub(crate) source_stale: AtomicBool,
     pub(crate) rebuilt_native: Mutex<Option<PathBuf>>,
+    resources: Mutex<resources::Sampler>,
 }
 
 #[tauri::command]
@@ -232,6 +234,13 @@ async fn export_user_tests(app:AppHandle)->Result<String,String>{
        .await.map_err(|e|e.to_string())?
 }
 
+
+#[tauri::command]
+fn resource_snapshot(state:State<'_,StudioState>)->Result<resources::Sample,String>{
+    let mut sampler=state.resources.lock().map_err(|e|e.to_string())?;
+    resources::snapshot(&mut sampler)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -245,7 +254,8 @@ pub fn run() {
             set_native_baseline, compare_native_sessions,
             open_workspace_document, save_workspace_document, create_notebook,
             git_summary, language_targets, rebuild_native, native_source_stale,
-            list_user_tests, save_user_tests, import_user_tests, export_user_tests
+            list_user_tests, save_user_tests, import_user_tests, export_user_tests,
+            resource_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start PlusMinus Studio 5");
