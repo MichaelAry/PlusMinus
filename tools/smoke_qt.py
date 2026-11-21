@@ -72,9 +72,16 @@ window.new_file()
 assert window.documents.count() >= 2
 window.documents.setCurrentIndex(0)
 assert window.editor.toPlainText()
-window.open_language_internals('print')
+# Ctrl+click symbol navigation must open the actual C++ source in an editor tab.
+window.open_language_internals('int')
+app.processEvents()
+assert window.documents.current_document().path.name == 'statements.cpp'
+assert 'if (checkKeyword("int"))' in window.editor.toPlainText()
+# Explicit Language Internals action must still open the independent native editor.
+window.open_language_internals()
 app.processEvents()
 assert window.language_window is not None
+window.language_window.select_symbol('print')
 assert not window.language_window.dirty(), 'Loading a C++ source must not mark it as edited'
 assert 'if (c.name == "print")' in window.language_window.editor.toPlainText()
 assert not window.language_window.editor.isReadOnly()
