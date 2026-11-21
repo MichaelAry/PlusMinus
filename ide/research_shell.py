@@ -48,6 +48,12 @@ class TaskCenter(QWidget):
         self.items.addItem(str(message))
         self.items.scrollToBottom()
 
+    def clear_finished(self):
+        for row in reversed(range(self.items.count())):
+            item = self.items.item(row)
+            if item is not None and '· running' not in item.text():
+                self.items.takeItem(row)
+
     def track(self, job, title):
         item = self.items.addItem(f"◌  {title} · running")
         # QListWidget.addItem() returns None; retain the inserted QListWidgetItem.
