@@ -185,7 +185,7 @@ pub async fn start_native_suite(app:AppHandle,state:State<'_,StudioState>,
     tokio::spawn(async move {
         run_suite(app,job_id,cases,label,on_event,token,root).await;
         let state_copy=cleanup_app.state::<StudioState>();
-        if let Ok(mut jobs)=state_copy.active_jobs.lock(){jobs.remove(&cleanup_id);}
+        if let Ok(mut jobs)=state_copy.active_jobs.lock(){jobs.remove(&cleanup_id);};
     });
     Ok(return_id)
 }
