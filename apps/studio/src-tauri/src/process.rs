@@ -133,6 +133,13 @@ pub async fn execute(
 ) -> Result<RunResponse, String> {
     validate_request(&request)?;
     let executable = resolve_native(app, "plusminus_runner")?;
+    execute_with_executable(executable,request,cancel).await
+}
+/// Testable entrypoint preserving the *real* unchanged one-shot C++ process.
+pub(crate) async fn execute_with_executable(
+    executable: PathBuf,request:RunRequest,cancel:CancellationToken
+)->Result<RunResponse,String>{
+    validate_request(&request)?;
     let start = Instant::now();
     let mut child = Command::new(executable)
         .arg(request.mode.argv())
@@ -187,6 +194,44 @@ pub async fn execute(
 mod tests {
     use super::*;
     const EMPTY: &str = r#"{"ok":true,"output":"","result":"0","variables":"","bytecode":"","error":"","diagnostics":[],"trace":[],"metrics":{}}"#;
+    fn staged_cpp_runner()->Option<PathBuf>{
+        let folder=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        std::fs::read_dir(folder).ok()?.filter_map(Result::ok)
+            .map(|e|e.path()).find(|p|{
+                let name=p.file_name().and_then(|n|n.to_str()).unwrap_or("");
+                name.starts_with("plusminus_runner-")&&
+                  name.ends_with(std::env::consts::EXE_SUFFIX)
+            })
+    }
+    #[tokio::test]
+    async fn actual_cpp_runner_all_modes_compile_errors_and_zero(){
+        let Some(path)=staged_cpp_runner() else{return;};
+        for mode in [RunMode::Run,RunMode::Compile,RunMode::Profile,RunMode::Trace]{
+            let response=execute_with_executable(path.clone(),RunRequest{
+                job_id:"cpp-smoke-001".into(),source:"print(0);\\n".replace("\\n","\n"),
+                mode,timeout_ms:10000,
+            },CancellationToken::new()).await.unwrap();
+            assert_eq!(response.exit_code,Some(0));
+            assert_eq!(response.report["ok"],true);
+            if matches!(mode,RunMode::Run){assert!(response.report["output"].as_str().unwrap().contains('0'));}
+            if matches!(mode,RunMode::Trace){assert!(response.report["trace"].as_array().unwrap().len()>0);}
+        }
+        let failure=execute_with_executable(path,RunRequest{
+            job_id:"cpp-smoke-err".into(),source:"print(;".into(),
+            mode:RunMode::Compile,timeout_ms:10000,
+        },CancellationToken::new()).await.unwrap();
+        assert_eq!(failure.exit_code,Some(1));
+        assert_eq!(failure.report["ok"],false);
+    }
+    #[tokio::test]
+    async fn actual_cpp_timeout_terminates_one_shot_runner(){
+        let Some(path)=staged_cpp_runner() else{return;};
+        let result=execute_with_executable(path,RunRequest{
+            job_id:"cpp-loop-001".into(),source:"while (1) {}".into(),
+            mode:RunMode::Run,timeout_ms:300,
+        },CancellationToken::new()).await;
+        assert!(result.unwrap_err().contains("timed out"));
+    }
     #[test]
     fn empty_stdout_and_zero_result_are_not_lost() {
         let result = decode_report(EMPTY.as_bytes(), Some(0)).unwrap();
