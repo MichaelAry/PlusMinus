@@ -48,25 +48,53 @@ def source_text(value):
 def validate(notebook):
     if not isinstance(notebook, dict) or notebook.get("nbformat") != 4:
         raise ValueError("Expected a Jupyter notebook (nbformat v4)")
+    metadata = notebook.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ValueError("Notebook metadata must be an object")
+    language_info = metadata.get("language_info", {})
+    kernelspec = metadata.get("kernelspec", {})
+    if not isinstance(language_info, dict) or not isinstance(kernelspec, dict):
+        raise ValueError("Notebook language metadata must be objects")
+    language = language_info.get("name")
+    kernel_name = kernelspec.get("name")
+    if ((language and language != "plusminus") or
+            (kernel_name and not str(kernel_name).startswith("plusminus"))):
+        raise ValueError("This notebook uses another kernel; Studio can execute only PlusMinus.")
     raw_cells = notebook.get("cells")
     if not isinstance(raw_cells, list):
         raise ValueError("Notebook has no valid cells array")
+    if len(raw_cells) > 2000:
+        raise ValueError("Notebook exceeds the 2,000-cell editor limit")
     for cell in raw_cells:
         if not isinstance(cell, dict) or cell.get("cell_type") not in ("code", "markdown"):
             raise ValueError("Only code and markdown cells can be edited in Studio")
         cell["source"] = source_text(cell.get("source", ""))
         cell.setdefault("id", uuid.uuid4().hex[:8])
+        if not isinstance(cell["id"], str) or not cell["id"]:
+            raise ValueError("Notebook cell id must be a nonempty string")
         cell.setdefault("metadata", {})
+        if not isinstance(cell["metadata"], dict):
+            raise ValueError("Notebook cell metadata must be an object")
         if cell["cell_type"] == "code":
             cell.setdefault("execution_count", None)
+            counter = cell["execution_count"]
+            if (counter is not None and
+                    (not isinstance(counter, int) or isinstance(counter, bool) or counter < 0)):
+                raise ValueError("Notebook execution_count must be a nonnegative integer or null")
             cell.setdefault("outputs", [])
-    notebook.setdefault("metadata", {})
+            if not isinstance(cell["outputs"], list) or not all(
+                    isinstance(value, dict) for value in cell["outputs"]):
+                raise ValueError("Notebook cell outputs must be an array of objects")
     notebook.setdefault("nbformat_minor", 5)
     return notebook
 
 
 def load_notebook(path):
-    return validate(json.loads(Path(path).read_text(encoding="utf-8-sig")))
+    path = Path(path)
+    # Avoid locking the GUI while loading notebooks with enormous embedded assets.
+    if path.stat().st_size > 32 * 1024 * 1024:
+        raise ValueError("Notebook exceeds the 32 MiB interactive editor limit")
+    return validate(json.loads(path.read_text(encoding="utf-8-sig")))
 
 
 def serialize(notebook):
