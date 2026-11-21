@@ -94,6 +94,7 @@ def run_native_case(binary, case, cancel=None, timeout=20):
     error = ""
     peak_rss = None
     cpu_ms = None
+    test_ms = None
     try:
         if cancel.is_set():
             raise InterruptedError("Canceled")
@@ -132,6 +133,8 @@ def run_native_case(binary, case, cancel=None, timeout=20):
             raise ValueError("Native test returned a mismatched result")
         status = result["status"]
         error = str(result.get("error", ""))
+        if isinstance(result.get("elapsed_ms"), (int, float)):
+            test_ms = round(float(result["elapsed_ms"]), 3)
         if process.returncode != (0 if status == "PASS" else 1):
             status, error = "ERROR", f"Native runner exit code {process.returncode}: {stderr}"
     except subprocess.TimeoutExpired:
@@ -148,6 +151,7 @@ def run_native_case(binary, case, cancel=None, timeout=20):
         "id": case["id"], "group": case["group"], "source": case.get("source", ""),
         "slow": bool(case.get("slow")), "status": status, "error": error[:4000],
         "elapsed_ms": round((time.perf_counter()-start)*1000, 3),
+        "test_ms": test_ms,
         "peak_rss_mb": round(peak_rss, 3) if peak_rss is not None else None,
         "cpu_ms": round(cpu_ms, 3) if cpu_ms is not None else None,
     }
@@ -178,7 +182,7 @@ class NativeHistory:
                     session_id INTEGER NOT NULL, test_id TEXT NOT NULL,
                     category TEXT NOT NULL, status TEXT NOT NULL,
                     elapsed_ms REAL NOT NULL, error TEXT NOT NULL, source TEXT NOT NULL,
-                    peak_rss_mb REAL, cpu_ms REAL,
+                    peak_rss_mb REAL, cpu_ms REAL, test_ms REAL,
                     PRIMARY KEY(session_id, test_id),
                     FOREIGN KEY(session_id) REFERENCES native_sessions(id)
                 );
@@ -186,6 +190,10 @@ class NativeHistory:
                     name TEXT PRIMARY KEY, session_id INTEGER NOT NULL
                 );
             """)
+            # Upgrade existing user databases without resetting their history.
+            columns = {col[1] for col in db.execute("PRAGMA table_info(native_results)")}
+            if "test_ms" not in columns:
+                db.execute("ALTER TABLE native_results ADD COLUMN test_ms REAL")
 
     @contextmanager
     def _connect(self):
@@ -212,9 +220,10 @@ class NativeHistory:
                 db.execute(
                     """INSERT INTO native_results
                        (session_id,test_id,category,status,elapsed_ms,error,source,
-                        peak_rss_mb,cpu_ms) VALUES (?,?,?,?,?,?,?,?,?)""",
+                        peak_rss_mb,cpu_ms,test_ms) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (session, r["id"], r["group"], r["status"], r["elapsed_ms"],
-                     r["error"], r["source"], r.get("peak_rss_mb"), r.get("cpu_ms")))
+                     r["error"], r["source"], r.get("peak_rss_mb"), r.get("cpu_ms"),
+                     r.get("test_ms")))
         return session
 
     def recent(self, limit=50):
@@ -228,10 +237,10 @@ class NativeHistory:
     def results(self, session_id):
         with self._connect() as db:
             rows = db.execute(
-                """SELECT test_id,category,status,elapsed_ms,error,source,peak_rss_mb,cpu_ms
+                """SELECT test_id,category,status,elapsed_ms,error,source,peak_rss_mb,cpu_ms,test_ms
                    FROM native_results WHERE session_id=?""",
                 (session_id,)).fetchall()
-        keys = ("id","group","status","elapsed_ms","error","source","peak_rss_mb","cpu_ms")
+        keys = ("id","group","status","elapsed_ms","error","source","peak_rss_mb","cpu_ms","test_ms")
         return {row[0]:dict(zip(keys,row)) for row in rows}
 
     def set_baseline(self, session_id):
@@ -248,17 +257,47 @@ class NativeHistory:
                 "SELECT session_id FROM native_baseline WHERE name='default'").fetchone()
         return result[0] if result else None
 
+    def session(self, session_id):
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT id,timestamp,label,git_sha,source_hash,dirty,platform,total_ms "
+                "FROM native_sessions WHERE id=?", (session_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown native test session: {session_id}")
+        keys = ("id","timestamp","label","git_sha","source_hash","dirty","platform","total_ms")
+        return dict(zip(keys, row))
+
     def compare(self, baseline_id, current_id):
         previous, current = self.results(baseline_id), self.results(current_id)
+        before_meta, after_meta = self.session(baseline_id), self.session(current_id)
         shared = set(previous) & set(current)
         introduced = sorted(k for k in shared if previous[k]["status"] == "PASS" and current[k]["status"] != "PASS")
         fixed = sorted(k for k in shared if previous[k]["status"] != "PASS" and current[k]["status"] == "PASS")
         remaining = sorted(k for k in shared if previous[k]["status"] != "PASS" and current[k]["status"] != "PASS")
+        performance = {}
+        for key in sorted(shared):
+            old, new = previous[key], current[key]
+            if old["status"] != "PASS" or new["status"] != "PASS":
+                continue
+            # Internal body timings remove process-startup overhead when available.
+            old_ms = old.get("test_ms")
+            new_ms = new.get("test_ms")
+            timing = "body" if old_ms is not None and new_ms is not None else "wall"
+            if timing == "wall":
+                old_ms, new_ms = old["elapsed_ms"], new["elapsed_ms"]
+            delta = new_ms - old_ms
+            performance[key] = {
+                "before_ms": round(old_ms, 3), "after_ms": round(new_ms, 3),
+                "delta_ms": round(delta, 3),
+                "delta_pct": round(100.0 * delta / old_ms, 2) if old_ms > 0 else None,
+                "metric": timing,
+            }
         return {
             "introduced": introduced, "fixed": fixed, "remaining_failures": remaining,
             "added": sorted(set(current)-set(previous)),
             "missing": sorted(set(previous)-set(current)),
-            "performance": {k: round(current[k]["elapsed_ms"]-previous[k]["elapsed_ms"],3)
-                            for k in shared if previous[k]["status"]=="PASS"
-                            and current[k]["status"]=="PASS"},
+            "performance": performance,
+            "baseline": before_meta, "current": after_meta,
+            "comparable_platform": before_meta["platform"] == after_meta["platform"],
+            "same_source": before_meta["source_hash"] == after_meta["source_hash"],
         }
