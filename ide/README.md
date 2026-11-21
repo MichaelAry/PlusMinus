@@ -4,7 +4,7 @@
 - **Core VM adapter:** `ide/engine.py` — C++ runner communication and OS telemetry.
 - **Analytics and persistence:** `ide/analytics.py` — lexical estimates, bytecode counts, built-in suites, SQLite.
 - **C++ bridge:** `ide/runner.cpp` — compile/run protocol and VM metrics.
-- **Dependencies:** `ide/requirements.txt` — PySide6 and psutil.
+- **Dependencies:** `ide/requirements.txt` — PySide6-Essentials (QtCore, QtGui, QtWidgets) and psutil. Full Qt WebEngine/Addons are not needed.
 
 Launch from the repository root with `python launch.py` or a double-click
 platform launcher. The launcher builds the C++ runner, creates `.venv`, installs
