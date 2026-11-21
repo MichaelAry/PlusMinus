@@ -172,6 +172,22 @@ window.language_window.select_symbol('print')
 assert not window.language_window.dirty(), 'Loading a C++ source must not mark it as edited'
 assert 'if (c.name == "print")' in window.language_window.editor.toPlainText()
 assert not window.language_window.editor.isReadOnly()
+# A no-op Save in a C++ tab must not invalidate an unchanged native binary.
+runner_before_save = window.runner
+native_before_save = window.native_runner
+original_save = window.documents.save_current
+window.documents.save_current = lambda: True
+try:
+    assert window.save_file()
+finally:
+    window.documents.save_current = original_save
+assert window.runner == runner_before_save
+assert window.native_runner == native_before_save
+# A modified C++ implementation invalidates both VM and C++ tests, not just one.
+window.language_window.auto_build.setChecked(False)
+window.language_source_saved('synthetic changed C++ source')
+assert window.native_stale and window.runner is None
+assert window.native_runner is None
 window.language_window.close()
 window.saved = window.editor.toPlainText()  # No unsaved-edit dialog in a headless test.
 window.close()

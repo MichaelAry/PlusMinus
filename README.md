@@ -240,3 +240,9 @@ still isolated and do not share persistent VM state.
 The Test Laboratory now updates incoming native C++ test results incrementally,
 retains selection, and keeps the source inspector open when running its selected
 method. Headless Qt smoke checks cover these behaviors on Linux, macOS and Windows.
+
+Source edits in `src/`, `include/`, `ide/runner.cpp` and C++ tests
+invalidate the affected native binaries until a successful rebuild. Pressing
+Save on an unchanged C++ file no longer needlessly invalidates the VM. Native
+Test Lab Refresh will not silently rediscover an obsolete test executable
+while source changes await rebuilding.
