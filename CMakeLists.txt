@@ -11,6 +11,7 @@ add_library(plusminus_core STATIC
     src/compiler/expressions.cpp
     src/vm/vm.cpp
     src/vm/executor.cpp
+    src/vm/builtins.cpp
     src/api.cpp
 )
 target_compile_features(plusminus_core PUBLIC cxx_std_20)

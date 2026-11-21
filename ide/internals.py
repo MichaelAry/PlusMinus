@@ -32,7 +32,8 @@ def compiler(anchor):
 
 
 def runtime(anchor):
-    return SourceTarget('src/vm/executor.cpp', anchor, 'VM / execution')
+    path = 'src/vm/builtins.cpp' if 'c.name ==' in anchor else 'src/vm/executor.cpp'
+    return SourceTarget(path, anchor, 'VM / execution')
 
 
 SYMBOLS = {
@@ -114,7 +115,7 @@ def locate_target(root: Path, target: SourceTarget) -> tuple[Path, int]:
             'include/plusminus/api.hpp',
             'src/compiler/compiler.cpp', 'src/compiler/scanner.cpp',
             'src/compiler/statements.cpp', 'src/compiler/expressions.cpp',
-            'src/vm/vm.cpp', 'src/vm/executor.cpp', 'src/api.cpp',
+            'src/vm/vm.cpp', 'src/vm/executor.cpp', 'src/vm/builtins.cpp', 'src/api.cpp',
         )
     }
     if path not in allowed:
