@@ -88,7 +88,7 @@ TEST_CLASS(AsyncExecutionExtended)
         TEST_METHOD(AsyncLoopAccumulator)
         {
             std::string prog =
-                "func addToC() { c = c + 1; }\n"
+                "func addToC() { lock(counter); c = c + 1; unlock(counter); }\n"
                 "c = 0;\n"
                 "i = 0;\n"
                 "while (i < 5) {\n"

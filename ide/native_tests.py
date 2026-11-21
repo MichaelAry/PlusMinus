@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from pathlib import Path
 
 try:
@@ -186,10 +187,15 @@ class NativeHistory:
                 );
             """)
 
+    @contextmanager
     def _connect(self):
         connection = sqlite3.connect(str(self.path), timeout=12)
-        connection.execute("PRAGMA busy_timeout=12000")
-        return connection
+        try:
+            connection.execute("PRAGMA busy_timeout=12000")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def save(self, label, results, root=ROOT):
         git_sha, dirty = _read_git(root)
