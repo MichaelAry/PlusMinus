@@ -1997,7 +1997,7 @@ def main():
         startup_mark("main: window.show() returned")
         app.processEvents()
         startup_mark("main: initial Qt events processed")
-        if '--gui-smoke' in argv:
+        if '--gui-smoke' in sys.argv:
             QTimer.singleShot(600, app.quit)
         startup_mark("main: entering Qt event loop")
         result = app.exec()
