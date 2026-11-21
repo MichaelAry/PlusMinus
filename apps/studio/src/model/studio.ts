@@ -20,7 +20,7 @@ interface StudioStore {
   transportError: string | null;
   setWorkspace: (workspace: string, entries: TreeEntry[]) => void;
   setEntries: (entries: TreeEntry[]) => void;
-  open: (doc: Document) => void;
+  open: (doc: Document, focus?: boolean) => void;
   close: (id: string) => void;
   edit: (id: string, source: string) => void;
   saved: (id: string, doc: Document) => void;
@@ -54,9 +54,9 @@ export const useStudio = create<StudioStore>((set) => ({
       response: null, transportError: null };
   }),
   setEntries: (entries) => set({ entries }),
-  open: (doc) => set((s) => ({
+  open: (doc, focus = true) => set((s) => ({
     documents: s.documents.some((d) => d.id === doc.path) ? s.documents : [...s.documents, { ...doc, id: doc.path, dirty: false }],
-    activeId: doc.path,
+    activeId: focus ? doc.path : s.activeId,
   })),
   close: (id) => set((s) => {
     const rest = s.documents.filter((d) => d.id !== id);
