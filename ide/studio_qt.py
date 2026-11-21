@@ -477,6 +477,7 @@ class Studio(QMainWindow):
         self.runner = find_runner()
         self.language_window = None
         self.native_building = False
+        self.native_stale = False
         self.file = None
         self.saved = EXAMPLE
         self.last_report = None
@@ -924,8 +925,11 @@ class Studio(QMainWindow):
         self.language_window.activateWindow()
 
     def language_source_saved(self, path):
-        # Do not accidentally execute a stale VM after modifying its C++ code.
+        # Do not accidentally execute a stale VM or old native tests after C++ edits.
         self.runner = None
+        self.native_stale = True
+        self.native_runner = None
+        self.native_panel.summary.setText('C++ source modified — rebuild before testing')
         self.engine_status.setText('● Native source changed / rebuild required')
         self.statusBar().showMessage(f'Interpreter source saved: {path}', 9000)
         if self.language_window and self.language_window.auto_build.isChecked():
@@ -942,7 +946,9 @@ class Studio(QMainWindow):
             self.error('Wait for running tests/programs to finish, then click Rebuild & test.')
             return
         self.native_building = True
+        self.native_stale = True
         self.runner = None
+        self.native_runner = None
         self.engine_status.setText('● Rebuilding C++ interpreter...')
         def work():
             try:
@@ -970,6 +976,7 @@ class Studio(QMainWindow):
         if self.runner is None:
             self.error('C++ build reported success but did not produce a runner.')
             return
+        self.native_stale = False
         self.engine_status.setText('● Runtime rebuilt')
         self.statusBar().showMessage('C++ interpreter rebuilt. Rerunning built-in tests.',10000)
         self.start_tests(startup=True)
@@ -1215,6 +1222,9 @@ class Studio(QMainWindow):
         self.nav.setCurrentRow(1)
 
     def save_file(self):
+        # Saving an unmodified C++ file must not invalidate a working VM.
+        before = self.documents.current_document()
+        changed = bool(before and before.modified)
         if not self.documents.save_current():
             return False
         doc = self.documents.current_document()
@@ -1223,14 +1233,16 @@ class Studio(QMainWindow):
             source_tree = (ROOT / 'src').resolve()
             header_tree = (ROOT / 'include').resolve()
             tests_tree = (ROOT / 'tests' / 'cpp').resolve()
-            if (path.is_relative_to(source_tree) or
+            if changed and (
+                    path.is_relative_to(source_tree) or
                     path.is_relative_to(header_tree) or
                     path == (ROOT / 'ide' / 'runner.cpp').resolve()):
                 self.language_source_saved(str(path))
                 # The test binary is also out of date after C++ engine changes.
                 self.native_runner = None
                 self.native_panel.summary.setText('Native C++ rebuild required')
-            elif path.is_relative_to(tests_tree):
+            elif changed and path.is_relative_to(tests_tree):
+                self.native_stale = True
                 self.native_runner = None
                 self.native_panel.summary.setText(
                     'Native C++ tests changed — rebuild to run updated cases')
@@ -1582,6 +1594,10 @@ class Studio(QMainWindow):
             self.nav.setCurrentRow(1)
 
     def discover_native(self):
+        if self.native_stale:
+            self.native_panel.summary.setText(
+                'Native C++ source changed — rebuild before discovering/running tests.')
+            return
         self.native_runner = find_native_runner()
         if self.native_runner is None:
             self.native_panel.summary.setText(
