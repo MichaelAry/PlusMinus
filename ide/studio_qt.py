@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PlusMinus Studio 2.0: Qt desktop IDE, testing and runtime observability.
+"""PlusMinus Studio 4.0: Research Workbench / Qt desktop IDE.
 
 The C++ interpreter is always executed out-of-process. Qt is confined to the
 main thread; background jobs emit immutable results through Qt signals.
@@ -463,7 +463,15 @@ class NativeTestJob(QThread):
 class Studio(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.settings = QSettings('PlusMinus', 'Studio2')
+        self.settings = QSettings('PlusMinus', 'Studio4')
+        # Preserve open files, geometry and existing preferences from Studio 3.
+        previous_settings = QSettings('PlusMinus', 'Studio2')
+        for setting in ('geometry', 'workspace_pages', 'open_files',
+                        'split_editor', 'last_file'):
+            if self.settings.value(setting) is None:
+                old_value = previous_settings.value(setting)
+                if old_value is not None:
+                    self.settings.setValue(setting, old_value)
         self.history = HistoryStore()
         self.runner = find_runner()
         self.language_window = None
@@ -511,74 +519,9 @@ class Studio(QMainWindow):
         QTimer.singleShot(1200, self.discover_native)
 
     def make_shell(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        outer = QHBoxLayout(central)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        rail = QFrame()
-        rail.setObjectName('rail')
-        rail.setFixedWidth(198)
-        rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(9, 24, 9, 14)
-        rail_layout.setSpacing(13)
-        title = label('＋／－  PLUSMINUS')
-        title.setStyleSheet('font-size: 12pt; font-weight: 800; padding: 0 9px;')
-        rail_layout.addWidget(title)
-        sub = label('STUDIO 3.0  /  DEVELOPMENT', style='muted')
-        sub.setStyleSheet('color: #7f8ca0; font-size: 8pt; padding-left: 9px;')
-        rail_layout.addWidget(sub)
-        self.nav = QListWidget()
-        self.nav.addItems(['Overview', 'Code Editor', 'Test Center',
-                           'Profiler', 'Resources', 'Benchmarks', 'History & Reports',
-                           'Code Analysis'])
-        rail_layout.addWidget(self.nav, 1)
-        self.engine_status = label('●  Checking runtime...', style='muted')
-        rail_layout.addWidget(self.engine_status)
-        outer.addWidget(rail)
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(0)
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(20, 12, 18, 12)
-        toolbar_layout.addWidget(label('WORKSPACE   /   LOCAL'))
-        toolbar_layout.addStretch(1)
-        toolbar_layout.addWidget(button('Open', self.open_file))
-        toolbar_layout.addWidget(button('Save', self.save_file))
-        toolbar_layout.addWidget(button('Run  F5', lambda: self.launch('run'), primary=True))
-        toolbar_layout.addWidget(button('Profile  F6', lambda: self.launch('run', profile=True)))
-        toolbar_layout.addWidget(button('Trace  F7', lambda: self.launch('trace')))
-        toolbar_layout.addWidget(button('Run tests', self.start_tests))
-        toolbar_layout.addWidget(button('Language C++', self.open_language_internals))
-        toolbar_layout.addWidget(button('Stop', self.stop))
-        right_layout.addWidget(toolbar)
-        self.stack = WorkspaceTabs()
-        self.workspace = self.stack
-        for title, create in zip(
-                ('Overview', 'Code Editor', 'Test Center', 'Profiler',
-                 'Resources', 'Benchmarks', 'History & Reports', 'Code Analysis'),
-                (self.make_overview, self.make_editor, self.make_tests,
-                 self.make_profiler, self.make_resources, self.make_benchmarks,
-                 self.make_history, self.make_analysis)):
-            self.workspace.register_page(title, create())
-        right_layout.addWidget(self.workspace, 1)
-        outer.addWidget(right, 1)
-        self.nav.currentRowChanged.connect(self.workspace.open_page)
-        self.workspace.pageActivated.connect(self.nav.setCurrentRow)
-        self.nav.setCurrentRow(0)
-        for shortcut, action in [('F5', lambda: self.launch('run')),
-                                 ('F6', lambda: self.launch('run', profile=True)),
-                                  ('F7', lambda: self.launch('trace')),
-                                 ('Ctrl+S', self.save_file), ('Ctrl+O', self.open_file),
-                                 ('Ctrl+N', self.new_file), ('Ctrl+F', self.find_in_file),
-                                  ('Ctrl+G', self.go_to_line),
-                                 ('Ctrl+Shift+I', self.open_language_internals)]:
-            a = QAction(self)
-            a.setShortcut(shortcut)
-            a.triggered.connect(action)
-            self.addAction(a)
+        # Preserve existing execution/test methods; replace only the GUI layout.
+        from research_shell import build_research_shell
+        build_research_shell(self, ROOT)
 
     def make_overview(self):
         page_widget, layout = page('Workspace Overview', 'Execution intelligence · test health · system telemetry')
@@ -677,8 +620,11 @@ class Studio(QMainWindow):
         self.code_warnings = QPlainTextEdit()
         self.code_warnings.setReadOnly(True)
         ins.addWidget(self.code_warnings,1)
-        split.addWidget(insight)
-        split.setSizes([800,300])
+        if getattr(self, 'research_mode', False):
+            self.research_inspector_widget = insight
+        else:
+            split.addWidget(insight)
+            split.setSizes([800, 300])
         layout.addWidget(split, 3)
         results = QTabWidget()
         self.output = QPlainTextEdit()
@@ -700,7 +646,10 @@ class Studio(QMainWindow):
                               ('Bytecode',self.bytecode),('Variables',self.variables)]:
             results.addTab(widget,title)
         self.result_tabs = results
-        layout.addWidget(results, 2)
+        if getattr(self, 'research_mode', False):
+            self.research_bottom_widget = results
+        else:
+            layout.addWidget(results, 2)
         return page_widget
 
     def make_tests(self):
@@ -898,6 +847,8 @@ class Studio(QMainWindow):
     def spawn(self, work, success, title):
         job = Job(work)
         self.jobs.append(job)
+        if hasattr(self, 'task_center'):
+            self.task_center.track(job, title)
         job.complete.connect(success)
         job.failed.connect(lambda text: self.error(f'{title} failed: {text}'))
         job.finished.connect(lambda j=job: self.finished_job(j))
@@ -1202,9 +1153,15 @@ class Studio(QMainWindow):
 
     def open_file(self):
         filename, _ = QFileDialog.getOpenFileName(
-            self,'Open PlusMinus file',str(ROOT),'PlusMinus (*.pm);;All files (*)')
+            self, 'Open source or notebook', str(ROOT),
+            'PlusMinus, C++ and notebooks (*.pm *.cpp *.h *.hpp *.ipynb);;All files (*)')
         if filename:
-            self.read_file(Path(filename))
+            path = Path(filename)
+            if path.suffix.lower() == '.ipynb':
+                self.research_controller.activate('Notebooks')
+                self.notebooks.open_file(path)
+            else:
+                self.read_file(path)
 
     def read_file(self, path):
         try:
@@ -1243,6 +1200,8 @@ class Studio(QMainWindow):
         if str(self.settings.value('split_editor','false')).lower() in ('true','1'):
             self.toggle_split_editor()
         self.update_analysis()
+        if hasattr(self, 'research_controller'):
+            self.research_controller.restore_layout()
 
     def record(self, category, label_text, source, report):
         metrics = report.get('metrics', {})
@@ -1508,6 +1467,8 @@ class Studio(QMainWindow):
     def native_discovered(self, cases):
         self.native_cases = cases
         self.native_panel.set_cases(cases)
+        if hasattr(self, 'test_analysis'):
+            self.test_analysis.set_cases(cases)
         previous = self.native_history.recent(1)
         if previous:
             self.last_native_session = previous[0]['id']
@@ -1516,6 +1477,20 @@ class Studio(QMainWindow):
             for record in self.native_history.results(self.last_native_session).values():
                 self.native_panel.last_results[record['id']] = record
             self.native_panel.populate()
+
+    def run_native_identifier(self, identifier):
+        """Run a specific C++ method selected in the native source inspector."""
+        self.native_panel.status_filter.setCurrentIndex(0)
+        self.native_panel.group_filter.setCurrentIndex(0)
+        self.native_panel.search.setText(identifier)
+        self.native_panel.populate()
+        for row in range(self.native_panel.table.rowCount()):
+            cell = self.native_panel.table.item(row, 0)
+            if cell and cell.data(Qt.ItemDataRole.UserRole) == identifier:
+                self.native_panel.table.selectRow(row)
+                self.start_native_tests('selected')
+                return
+        self.error(f'Native test not found: {identifier}')
 
     def start_native_tests(self, selection='quick'):
         if not self.native_runner or not self.native_cases:
@@ -1550,7 +1525,11 @@ class Studio(QMainWindow):
         self.nav.setCurrentRow(2)
         job = NativeTestJob(self.native_runner, cases, self.cancel)
         self.jobs.append(job)
+        if hasattr(self, 'task_center'):
+            self.task_center.track(job, f'Native C++ tests ({len(cases)})')
         job.progress.connect(self.native_panel.set_result)
+        if hasattr(self, 'test_analysis'):
+            job.progress.connect(self.test_analysis.set_result)
         job.completed.connect(
             lambda results, requested=selection: self.native_completed(results, requested))
         job.finished.connect(lambda j=job: self.finished_job(j))
@@ -1571,6 +1550,8 @@ class Studio(QMainWindow):
             '\n'.join(failures[:35]) if failures else
             f'All {total} executed C++ tests passed. Session saved to SQLite.')
         self.refresh_history()
+        if hasattr(self, 'test_analysis'):
+            self.test_analysis.show_selected()
 
     def set_native_baseline(self):
         if self.last_native_session is None:
@@ -1774,6 +1755,9 @@ class Studio(QMainWindow):
         if not self.documents.confirm_all():
             event.ignore()
             return
+        if hasattr(self, 'notebooks') and not self.notebooks.maybe_close():
+            event.ignore()
+            return
         self.cancel.set()
         for job in self.jobs:
             if job.isRunning():
@@ -1786,6 +1770,8 @@ class Studio(QMainWindow):
         self.settings.setValue('workspace_pages',self.workspace.open_page_ids())
         self.settings.setValue('open_files',self.documents.open_paths())
         self.settings.setValue('split_editor',self.split_pane.isVisible())
+        if hasattr(self, 'research_controller'):
+            self.research_controller.save_layout()
         event.accept()
 
 
