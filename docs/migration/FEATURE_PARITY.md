@@ -44,3 +44,18 @@ execution must substantiate DONE. Do not invent measurements or CI results.
 - [ ] Unknown metrics are explicitly marked "not measured".
 - [ ] Cancel and timeout stop the process (no orphaned process).
 - [ ] Unmodified C++ sources and CMake verified with git diff.
+
+## Stage 2 evidence matrix (DONE / PARTIAL / BLOCKED)
+
+For up-to-date feature-level evidence, see
+[STAGE2_STATUS.md](STAGE2_STATUS.md). As of this branch, protected C++/Qt source
+preservation is DONE by Git comparison; native Test Lab, notebooks, history,
+editor, analysis, profiling, Git, Language Internals and Qt-settings export
+remain PARTIAL until the latest CI and real desktop smoke tests are complete.
+Live VM stepping/breakpoints, persistent cross-cell VM state and structured
+native AST are BLOCKED by the unchanged C++ runner contract. This is not the
+Stage 3 cutover.
+
+## Stage 2 trace and history improvements
+
+An interactive, virtualized post-execution trace replay preserves the native 5000-event cap. The History panel can stream complete SQLite history into a new CSV or JSON file. A differential smoke check compares Studio 4's Python adapter against the unchanged C++ runner in CI. These features remain PARTIAL until all cross-platform and GUI checks pass.

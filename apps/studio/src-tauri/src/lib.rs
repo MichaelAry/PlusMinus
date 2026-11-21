@@ -1,37 +1,56 @@
 mod process;
 mod workspace;
+mod native_tests;
+mod history;
+mod extra_files;
+mod git_view;
+mod language;
+mod user_tests;
+mod resources;
+mod tasks;
 
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+use std::{path::PathBuf, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
+use serde_json::Value;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
-struct StudioState {
-    active_jobs: Mutex<HashMap<String, CancellationToken>>,
-    root: Mutex<Option<PathBuf>>,
+pub(crate) struct StudioState {
+    pub(crate) tasks: tasks::TaskRegistry,
+    pub(crate) root: Mutex<Option<PathBuf>>,
+    pub(crate) source_stale: AtomicBool,
+    pub(crate) rebuilt_native: Mutex<Option<PathBuf>>,
+    resources: Mutex<resources::Sampler>,
 }
 
 #[tauri::command]
 async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: process::RunRequest)
     -> Result<process::RunResponse, String> {
     process::validate_request(&request)?;
-    let token = CancellationToken::new();
-    {
-        let mut jobs = state.active_jobs.lock().map_err(|e| e.to_string())?;
-        if jobs.contains_key(&request.job_id) { return Err("Duplicate job_id".into()); }
-        jobs.insert(request.job_id.clone(), token.clone());
-    }
+    if state.source_stale.load(Ordering::SeqCst){return Err("C++ source modified; rebuild the native engine before running".into());}
+    let token = state.tasks.register(&request.job_id,"source",1)?;
     let id = request.job_id.clone();
-    let result = process::execute(&app, request, token).await;
-    state.active_jobs.lock().map_err(|e| e.to_string())?.remove(&id);
+    let category = format!("{:?}",request.mode);
+    let source = request.source.clone();
+    let result = process::execute(&app, request, token.clone()).await;
+    let was_canceled = token.is_cancelled();
+    if let Ok(ref report)=result {
+        let ok=report.report["ok"].as_bool().unwrap_or(false);
+        let ms=report.wall_ms;
+        let details=report.report.clone();
+        let _=tauri::async_runtime::spawn_blocking(move ||
+            history::save_run(&category,"Source execution",&source,ok,ms,&details)
+        ).await;
+    }
+    let passed = result.as_ref().ok().and_then(|r|r.report["ok"].as_bool()).unwrap_or(false);
+    state.tasks.advance(&id, passed)?;
+    state.tasks.complete(&id,None,was_canceled,result.as_ref().err().cloned());
     result
 }
 
 #[tauri::command]
 fn cancel_run(state: State<'_, StudioState>, job_id: String) -> Result<bool, String> {
-    let jobs = state.active_jobs.lock().map_err(|e| e.to_string())?;
-    if let Some(job) = jobs.get(&job_id) { job.cancel(); Ok(true) } else { Ok(false) }
+    state.tasks.cancel(&job_id)
 }
 
 #[tauri::command]
@@ -45,6 +64,8 @@ async fn choose_workspace(app: AppHandle, state: State<'_, StudioState>) -> Resu
     if !folder.is_dir() { return Err("Workspace is not a directory".into()); }
     let display = folder.to_string_lossy().into_owned();
     *state.root.lock().map_err(|e| e.to_string())? = Some(folder);
+    *state.rebuilt_native.lock().map_err(|e|e.to_string())? = None;
+    state.source_stale.store(false,Ordering::SeqCst);
     Ok(display)
 }
 
@@ -93,6 +114,154 @@ fn native_test_status(app: AppHandle) -> Result<String, String> {
     process::resolve_native(&app, "plusminus_native_tests").map(|_| "Native test binary found".into())
 }
 
+
+#[tauri::command]
+async fn history_overview() -> Result<Value,String>{
+    tauri::async_runtime::spawn_blocking(history::overview).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn recent_runs(limit:i64)->Result<Value,String>{
+    tauri::async_runtime::spawn_blocking(move||history::recent_runs(limit))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn native_sessions(limit:i64)->Result<Value,String>{
+    tauri::async_runtime::spawn_blocking(move||history::sessions(limit))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn session_results(session_id:i64)->Result<Value,String>{
+    tauri::async_runtime::spawn_blocking(move||history::native_results(session_id))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn set_native_baseline(session_id:i64)->Result<(),String>{
+    tauri::async_runtime::spawn_blocking(move||history::baseline(session_id))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn compare_native_sessions(base_id:i64,current_id:i64)->Result<Value,String>{
+    tauri::async_runtime::spawn_blocking(move||history::compare(base_id,current_id))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn open_workspace_document(state:State<'_,StudioState>,path:String)->Result<extra_files::TextDocument,String>{
+    let root=workspace_root(&state)?;
+    tauri::async_runtime::spawn_blocking(move||extra_files::open(&root,&path))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn save_workspace_document(state:State<'_,StudioState>,path:String,source:String,expected:String)
+    ->Result<extra_files::TextDocument,String>{
+    let root=workspace_root(&state)?;
+    let cpp=extra_files::is_cpp_file(&path);
+    let saved=tauri::async_runtime::spawn_blocking(move||extra_files::save(&root,&path,&source,&expected))
+        .await.map_err(|e|e.to_string())??;
+    if cpp {state.source_stale.store(true,Ordering::SeqCst);}
+    Ok(saved)
+}
+#[tauri::command]
+async fn create_notebook(state:State<'_,StudioState>,path:String,source:String)
+    ->Result<extra_files::TextDocument,String>{
+    let root=workspace_root(&state)?;
+    tauri::async_runtime::spawn_blocking(move||extra_files::create(&root,&path,&source))
+        .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn git_summary(state:State<'_,StudioState>)->Result<git_view::GitSummary,String>{
+    let root=workspace_root(&state)?;
+    Ok(git_view::summary(&root).await)
+}
+#[tauri::command]
+async fn language_targets(state:State<'_,StudioState>,keyword:String)
+    ->Result<Vec<language::Target>,String>{
+    let root=workspace_root(&state)?;
+    tauri::async_runtime::spawn_blocking(move||language::targets(&root,&keyword))
+      .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn rebuild_native(app:AppHandle,state:State<'_,StudioState>)->Result<String,String>{
+    let root=workspace_root(&state)?;
+    let log=language::rebuild(&root).await?;
+    let build=root.join("build/studio5");
+    let ext=std::env::consts::EXE_SUFFIX;
+    let binary=build.join(format!("plusminus_runner{ext}"));
+    let native=build.join(format!("plusminus_native_tests{ext}"));
+    let folder=if binary.is_file()&&native.is_file(){build}else{
+        let release=build.join("Release");
+        if !release.join(format!("plusminus_runner{ext}")).is_file() ||
+           !release.join(format!("plusminus_native_tests{ext}")).is_file(){
+            return Err("CMake succeeded but expected runner and test binary were not found".into());
+        }
+        release
+    };
+    let canonical=folder.canonicalize().map_err(|e|e.to_string())?;
+    if !canonical.starts_with(&root){return Err("Unexpected build output location".into());}
+    *state.rebuilt_native.lock().map_err(|e|e.to_string())?=Some(canonical);
+    state.source_stale.store(false,Ordering::SeqCst);
+    let _=app;
+    Ok(log)
+}
+#[tauri::command]
+fn native_source_stale(state:State<'_,StudioState>)->bool{
+    state.source_stale.load(Ordering::SeqCst)
+}
+
+
+#[tauri::command]
+async fn list_user_tests()->Result<user_tests::UserBundle,String>{
+    tauri::async_runtime::spawn_blocking(user_tests::list)
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn save_user_tests(cases:Vec<user_tests::UserCase>,expected:String)
+    ->Result<user_tests::UserBundle,String>{
+    tauri::async_runtime::spawn_blocking(move||user_tests::save(cases,expected))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn import_user_tests(app:AppHandle,expected:String)
+    ->Result<user_tests::UserBundle,String>{
+    tauri::async_runtime::spawn_blocking(move||user_tests::import_file(app,expected))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn export_user_tests(app:AppHandle)->Result<String,String>{
+    tauri::async_runtime::spawn_blocking(move||user_tests::export_file(app))
+       .await.map_err(|e|e.to_string())?
+}
+
+
+#[tauri::command]
+fn resource_snapshot(state:State<'_,StudioState>)->Result<resources::Sample,String>{
+    let mut sampler=state.resources.lock().map_err(|e|e.to_string())?;
+    resources::snapshot(&mut sampler)
+}
+
+
+#[tauri::command]
+fn task_snapshot(state:State<'_,StudioState>,job_id:String)->Result<Option<tasks::TaskSnapshot>,String>{
+    state.tasks.snapshot(&job_id)
+}
+#[tauri::command]
+fn list_tasks(state:State<'_,StudioState>)->Result<Vec<tasks::TaskSnapshot>,String>{
+    state.tasks.list()
+}
+
+#[tauri::command]
+async fn export_history(app:AppHandle,format:String)->Result<String,String>{
+    if format!="json" && format!="csv"{return Err("Choose json or csv".into());}
+    let file_format=format.clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let extension=if file_format=="csv"{"csv"}else{"json"};
+        let selected=app.dialog().file().add_filter("History",&[extension])
+            .blocking_save_file().ok_or("Export cancelled")?
+            .into_path().map_err(|e|e.to_string())?;
+        let count=history::export_runs_to(&selected,&file_format)?;
+        Ok(format!("Exported {count} runs to {}",selected.display()))
+    }).await.map_err(|e|e.to_string())?
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -100,7 +269,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             run_source, cancel_run, choose_workspace, list_workspace,
             open_source, save_source, create_source, engine_status,
-            native_test_status
+            native_test_status,
+            native_tests::list_native_tests, native_tests::start_native_suite,
+            history_overview, recent_runs, native_sessions, session_results,
+            set_native_baseline, compare_native_sessions,
+            open_workspace_document, save_workspace_document, create_notebook,
+            git_summary, language_targets, rebuild_native, native_source_stale,
+            list_user_tests, save_user_tests, import_user_tests, export_user_tests,
+            resource_snapshot, task_snapshot, list_tasks, export_history
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start PlusMinus Studio 5");

@@ -52,6 +52,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify C++ core and Qt files remain unchanged
+        shell: bash
+        run: |
+          git fetch --no-tags origin master --depth=1
+          git diff --exit-code origin/master HEAD -- \
+            src/ include/ ide/ tests/cpp/ tests/portable/ \
+            CMakeLists.txt launch.py .github/workflows/desktop.yml
+
       - name: Install Linux Tauri prerequisites
         if: runner.os == 'Linux'
         run: |
@@ -86,6 +94,13 @@ jobs:
 
       - name: Smoke native C++ process protocol
         run: node scripts/smoke-native.mjs --build-dir build/studio5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compare Qt execution adapter against native C++ reports
+        run: python scripts/check-qt-native-parity.py --build-dir build/studio5
 
       - name: Install frontend dependencies
         working-directory: apps/studio

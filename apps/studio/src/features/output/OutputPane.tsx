@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStudio } from "../../model/studio";
 import { formatMetric, renderOutput } from "./present";
 import type { RunResponse } from "../../api/contracts";
+import { TraceReplay } from "./TraceReplay";
 
 type View = "output" | "diagnostics" | "metrics" | "bytecode" | "trace";
 
@@ -60,11 +61,7 @@ function OutputContents({ view, setView, response, transportError, runningJob }:
           <Metric title="Exit code" value={response.exit_code === null ? "unavailable" : String(response.exit_code)} />
         </div>}
         {report && view === "bytecode" && <pre>{report.bytecode || "(No bytecode produced)"}</pre>}
-        {report && view === "trace" && <div>
-          <div className="muted-note">Post-execution trace replay — not live debugging. {report.trace_truncated ? "Truncated at 5,000 events." : ""}</div>
-          <pre>{report.trace.length ? report.trace.map((t, i) =>
-            [String(i).padStart(4), "IP " + t.ip, t.opcode, "thread " + t.thread, "depth " + t.stack_depth].join(" · ")).join("\n") : "(No trace collected)"}</pre>
-        </div>}
+        {report && view === "trace" && <TraceReplay trace={report.trace} nativeTruncated={report.trace_truncated} />}
       </div>
     </div>
   );

@@ -54,3 +54,39 @@ Test Orchestrator will add typed channels for test progress and bounded
 concurrency; SQLite/read-only history; source rebuild operations; notebook
 file round-trip. This is a Rust/application-level extension, not a claim
 that the current C++ binary can accept JSON-RPC or live debug commands.
+
+## Stage 2 additions (Rust/Tauri, not new C++ commands)
+
+- list_native_tests / start_native_suite (jobId, testIds, label, onEvent Channel): independent native C++ test worker processes, bounded concurrency two, progress and cancel_run using the common active-jobs registry.
+- history_overview / recent_runs / native_sessions / session_results / set_native_baseline / compare_native_sessions: read/write studio-v5.db. Original studio.db is opened read-only solely for SQLite Backup API migration.
+- open_workspace_document / save_workspace_document / create_notebook: validated UTF-8 notebook v4 or limited checked-out C++ source. Outside user-selected workspace and symlink traversal rejected.
+- git_summary: read-only fixed Git commands; language_targets / rebuild_native / native_source_stale: fixed source anchors and explicit CMake rebuilding.
+- list_user_tests / save_user_tests / import_user_tests / export_user_tests: validated user test cases, optimistic digest, original user_tests.json left unchanged; copied into user_tests-v5.json.
+- resource_snapshot: observed host Rust process RSS/CPU only. The WebView and C++ child-process metrics are not included in this sample.
+
+No public shell command is granted to JavaScript, no native VM live stepping, no persistent cross-cell kernel and no genuine structured AST output.
+
+## Stage 2 TaskRegistry contract
+
+- \`task_snapshot({jobId})\` -> nullable
+  \`{job_id,kind,status,done,total,passed,failed,session_id,error,created_at_ms}\`.
+- \`list_tasks()\` -> snapshots sorted newest first. Task statuses:
+  \`running\`, \`cancel_requested\`, \`completed\`, \`canceled\`, \`error\`.
+- \`cancel_run({jobId})\` requests cancellation for source executions and
+  independent native test suites. Cancellation is best-effort process kill;
+  structured "canceled" status is not a native C++ response.
+- Registry snapshots survive a Dockview panel unmount and can be reloaded by
+  another pane in the same process. Completed test results are persisted in
+  \`studio-v5.db\`; the active TaskRegistry itself does NOT survive app restart.
+- Native test progress is delivered through a Tauri Channel per completed
+  test, never per C++ VM instruction. A detached UI can poll snapshots.
+- Source fingerprint of new native sessions reproduces Studio 4's per-parent
+  ordered path+byte SHA256 on the host OS; legacy metadata is copied unchanged.
+
+Source/runner protocols remain distinct: \`plusminus_runner\` consumes raw
+UTF-8 stdin until EOF, no JSON-RPC; \`plusminus_native_tests\` consumes argv
+\`--list\` or \`--run ID\` and writes JSON Lines.
+
+## Complete history export
+
+`export_history({format: "csv" | "json"})` presents a native save dialog. The destination must not already exist. The streaming exporter reads only `studio-v5.db` and leaves `studio.db` untouched; CSV output escapes quotes and guards spreadsheet formula interpretation. There is no 1000-record UI limit on exported data.

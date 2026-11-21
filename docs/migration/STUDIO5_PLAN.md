@@ -100,3 +100,16 @@ no critical performance regressions, data safety and rollback documented.
 Live VM pause/breakpoints/step, real-time trace stream, structured compiler
 AST and a persistent shared-state notebook VM kernel. Rust cannot implement
 these reliably by changing only the desktop interface.
+
+## Stage 2 implementation checkpoints (separate Draft PR)
+
+The Stage 2 code extends the original one-shot IPC with a Rust TaskRegistry,
+bounded native test worker pool and progress Channels, plus read-only
+SQLite Backup API migration and notebook v4 file support. This remains a
+parallel GUI; the Qt launchers and C++ engine are never replaced in Stage 2.
+
+Acceptance requires *both* green CI and real installed desktop smoke tests
+against Qt's output, history and file fixtures, as detailed in
+[STAGE2_STATUS.md](STAGE2_STATUS.md). New UI modules without run evidence
+are PARTIAL, not DONE. The third stage begins only after Stage 2 parity
+criteria are satisfied and reviewed.

@@ -30,3 +30,17 @@ Measurement protocol for Stage 3:
 
 Core language performance should not change when identical native binaries
 are used; wrapper start/IPC/telemetry overhead remains to be measured.
+
+## Stage 2 instrumentation availability
+
+The Resources panel can sample Tauri/Rust backend CPU and RSS from the operating system; these are real process measurements but do not include the WebView renderer or native C++ worker. The Profiler panel graphs runner wall times and C++-reported opcode/VM metrics from actual executions. No cross-platform comparative measurements have been performed in this migration session and no baseline numbers are claimed.
+
+## Observability and comparison limits (Stage 2)
+
+The Rust resource sampler measures only its own PID's RSS/CPU; full desktop
+RSS must also count WebView and C++ children. Benchmarks use the original
+runner's wall/VM timing, with mean/median/interpolated p95, but no repeatable
+hardware comparison against Studio 4 is present in this branch. No numerical
+performance claim may be made until raw scripts and measurements are checked
+on the same machine and identical C++ binary. CI packaging alone does not
+measure UI responsiveness or installed launch success.
