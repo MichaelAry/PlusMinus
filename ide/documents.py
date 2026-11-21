@@ -17,6 +17,7 @@ class SourceDocument:
 class DocumentTabs(QTabWidget):
     activated = Signal(object)
     savedFile = Signal(str)
+    documentsChanged = Signal()
 
     def __init__(self, factory, parent=None):
         super().__init__(parent)
@@ -44,6 +45,7 @@ class DocumentTabs(QTabWidget):
         self._update_caption(editor)
         self.setCurrentIndex(index)
         self.activated.emit(doc)
+        self.documentsChanged.emit()
         return doc
 
     def open_path(self, path):
@@ -91,6 +93,7 @@ class DocumentTabs(QTabWidget):
         self._update_caption(doc.editor)
         self.savedFile.emit(str(doc.path))
         self.activated.emit(doc)
+        self.documentsChanged.emit()
         return True
 
     def maybe_save(self, doc):
@@ -113,6 +116,7 @@ class DocumentTabs(QTabWidget):
             return False
         self.removeTab(index)
         self._documents.pop(editor, None)
+        self.documentsChanged.emit()
         editor.deleteLater()
         if self.count() == 0:
             self.new_document()

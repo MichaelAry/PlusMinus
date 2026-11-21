@@ -22,6 +22,10 @@ window.nav.setCurrentRow(2)
 window.nav.setCurrentRow(1)
 assert window.workspace.count() >= 3, 'Sidebar must retain multiple open pages'
 assert window.editor.toPlainText()
+window.toggle_split_editor()
+assert window.split_pane.isVisible(), 'Split view must open'
+assert window.secondary_editor.document() is window.editor.document(), 'Split must share the live source document'
+window.toggle_split_editor()
 window.new_file()
 assert window.documents.count() >= 2
 window.documents.setCurrentIndex(0)
