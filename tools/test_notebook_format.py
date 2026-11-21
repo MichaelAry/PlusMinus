@@ -51,6 +51,35 @@ class NotebookDocumentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source_text([123, "wrong"])
 
+    def test_reject_malformed_execution_and_language_metadata(self):
+        examples = [
+            {"nbformat": 4, "cells": [], "metadata": []},
+            {"nbformat": 4, "cells": [], "metadata":
+                {"kernelspec": {"name": "python3"}}},
+            {"nbformat": 4, "cells": [], "metadata":
+                {"language_info": {"name": "python"}}},
+        ]
+        for example in examples:
+            with self.subTest(example=example), self.assertRaises(ValueError):
+                validate(example)
+        for malformed in (
+            {"execution_count": "not-a-number"},
+            {"outputs": "not-a-list"},
+            {"metadata": "not-an-object"},
+        ):
+            notebook = new_notebook()
+            cell = make_cell("code", "print(1);")
+            cell.update(malformed)
+            notebook["cells"] = [cell]
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                validate(notebook)
+
+    def test_limit_large_notebook_cell_count(self):
+        notebook = new_notebook()
+        notebook["cells"] = [make_cell("code") for _ in range(2001)]
+        with self.assertRaisesRegex(ValueError, "2,000"):
+            validate(notebook)
+
     def test_error_output_is_jupyter_compatible(self):
         output = error_output("compile: unexpected ')'")
         self.assertEqual(output["output_type"], "error")

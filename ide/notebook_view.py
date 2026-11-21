@@ -148,16 +148,26 @@ class NotebookCell(QFrame):
             elif kind == "error":
                 lines.append(str(output.get("evalue", "Execution error")))
             elif kind in ("execute_result", "display_data"):
-                lines.append(source_text(output.get("data", {}).get("text/plain", "")))
+                data = output.get("data", {})
+                if not isinstance(data, dict):
+                    continue
+                try:
+                    lines.append(source_text(data.get("text/plain", "")))
+                except ValueError:
+                    continue
         text = "\n".join(lines).strip()
         if self.kind == "code" and self.data.get("execution_count") is not None and not text:
             text = "(Completed without stdout or a return value.)"
         self.output.setPlainText(text)
         self.output.setVisible(bool(text))
         record = self.data.get("metadata", {}).get("plusminus_run", {})
+        if not isinstance(record, dict):
+            record = {}
         if record:
             from execution_report import _measured
             metrics = record.get("metrics") or {}
+            if not isinstance(metrics, dict):
+                metrics = {}
             self.stats.setText(
                 f"{'PASS' if record.get('ok') else 'FAIL'} · "
                 f"Wall {_measured(record.get('wall_ms'), 'ms')} · "
