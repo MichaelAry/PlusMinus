@@ -8,10 +8,12 @@ export function EditorPane() {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activeId = useStudio((s) => s.activeId);
+  const workspace = useStudio((s) => s.workspace);
   const docs = useStudio((s) => s.documents);
   const select = useStudio((s) => s.select);
   const close = useStudio((s) => s.close);
   const current = docs.find((d) => d.id === activeId) ?? docs[0];
+  const modelKey = current ? `${workspace ?? "no-workspace"}::${current.id}` : "";
 
   useEffect(() => {
     if (!host.current) return;
@@ -29,24 +31,24 @@ export function EditorPane() {
 
   useEffect(() => {
     if (!editor.current || !current) return;
-    let model = models.get(current.id);
+    let model = models.get(modelKey);
     if (!model || model.isDisposed()) {
       model = monaco.editor.createModel(current.source, "plusminus",
-        monaco.Uri.parse("inmemory://plusminus/" + encodeURIComponent(current.id)));
-      models.set(current.id, model);
+        monaco.Uri.parse("inmemory://plusminus/" + encodeURIComponent(modelKey)));
+      models.set(modelKey, model);
     }
     if (model.getValue() !== current.source) model.setValue(current.source);
     editor.current.setModel(model);
     const sub = model.onDidChangeContent(() => useStudio.getState().edit(current.id, model!.getValue()));
     return () => sub.dispose();
-  }, [current?.id]);
+  }, [modelKey]);
 
   useEffect(() => {
-    const ids = new Set(docs.map((d) => d.id));
+    const ids = new Set(docs.map((d) => `${workspace ?? "no-workspace"}::${d.id}`));
     for (const [id, model] of models) {
       if (!ids.has(id)) { model.dispose(); models.delete(id); }
     }
-  }, [docs]);
+  }, [docs, workspace]);
 
   return (
     <div className="editor-pane">
