@@ -32,6 +32,21 @@ with tempfile.TemporaryDirectory() as folder:
     assert window.documents.save_current()
     assert example.read_bytes().startswith(b'\xef\xbb\xbfprint(1);\r\n')
 
+# Native Test Laboratory status filters and failure-only reruns.
+panel = window.native_panel
+panel.set_cases([
+    {'id':'Math.pass','group':'arithmetic','source':'math.cpp'},
+    {'id':'Math.fail','group':'arithmetic','source':'math.cpp'},
+    {'id':'Loop.other','group':'control_flow','source':'loop.cpp'},
+])
+panel.set_result({'id':'Math.pass','status':'PASS','elapsed_ms':2.0})
+panel.set_result({'id':'Math.fail','status':'FAIL','elapsed_ms':3.0,'error':'expected mismatch'})
+assert [c['id'] for c in panel.nonpassing_cases()] == ['Math.fail']
+panel.status_filter.setCurrentText('FAIL')
+assert [c['id'] for c in panel.filtered_cases()] == ['Math.fail']
+panel.status_filter.setCurrentText('NOT RUN')
+assert [c['id'] for c in panel.filtered_cases()] == ['Loop.other']
+panel.status_filter.setCurrentText('All statuses')
 window.toggle_split_editor()
 assert window.split_pane.isVisible(), 'Split view must open'
 assert window.secondary_editor.document() is window.editor.document(), 'Split must share the live source document'
