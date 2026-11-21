@@ -21,6 +21,17 @@ assert report["ok"] and report["result"]=="0" and "0" in report["output"],report
 manifest=[json.loads(x) for x in pathlib.Path(sys.argv[2]).read_text().splitlines() if x.strip()]
 assert len(manifest)==225 and len({case["id"] for case in manifest})==225
 print("PASS: packaged sidecars execute unchanged VM and expose 225 tests")
+first=next(x["id"] for x in manifest if not x.get("slow"))
+pathlib.Path(sys.argv[1]).with_name("first-test-id.txt").write_text(first)
+PY
+first="$(cat "$temp/first-test-id.txt")"
+"$tests" --run "$first" >"$temp/first-test.jsonl"
+python3 - "$temp/first-test.jsonl" "$first" <<'PY'
+import json, pathlib, sys
+events=[json.loads(x) for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x.strip()]
+assert len(events)==1 and events[0]["type"]=="result",events
+assert events[0]["id"]==sys.argv[2] and events[0]["status"]=="PASS",events
+print("PASS: packaged plusminus_native_tests --run",sys.argv[2])
 PY
 # Window/process cold-start smoke, not a complete GUI parity test.
 app="$temp/usr/bin/plusminus-studio"
