@@ -13,18 +13,73 @@ function Log([string]$message) { Write-Host "[Studio 5] $message" }
 function Die([string]$message) { throw "[Studio 5] $message" }
 function Has([string]$tool) { return [bool](Get-Command $tool -ErrorAction SilentlyContinue) }
 
+# PowerShell 5.1 converts native stderr to ErrorRecords when output is captured
+# and ErrorActionPreference=Stop. rustup may print informational diagnostics
+# ("info: syncing channel updates ...") even when exit code is 0.
+# Probe external tools via Process and decide from the EXIT CODE, not stderr.
+# Probes never request rustup toolchain updates and have a bounded timeout.
+function Probe([string]$tool, [string]$arguments) {
+  $resolved = Get-Command $tool -ErrorAction SilentlyContinue
+  if (-not $resolved) {
+    return [pscustomobject]@{ ExitCode = 127; Output = ''; ErrorText = "$tool not found" }
+  }
+  $start = New-Object System.Diagnostics.ProcessStartInfo
+  $start.FileName = $resolved.Source
+  $start.Arguments = $arguments
+  $start.UseShellExecute = $false
+  $start.RedirectStandardOutput = $true
+  $start.RedirectStandardError = $true
+  $start.CreateNoWindow = $true
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $start
+  try {
+    if (-not $process.Start()) {
+      return [pscustomobject]@{ ExitCode = 127; Output = ''; ErrorText = "$tool could not start" }
+    }
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(10000)) {
+      $process.Kill()
+      $process.WaitForExit()
+      return [pscustomobject]@{ ExitCode = 124; Output = ''; ErrorText = "$tool probe timed out" }
+    }
+    return [pscustomobject]@{
+      ExitCode = $process.ExitCode
+      Output = $stdout.Result
+      ErrorText = $stderr.Result
+    }
+  } catch {
+    return [pscustomobject]@{ ExitCode = 127; Output = ''; ErrorText = $_.Exception.Message }
+  } finally {
+    $process.Dispose()
+  }
+}
+
 function Refresh-Path {
   $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
   $user = [Environment]::GetEnvironmentVariable('Path', 'User')
   $cargo = Join-Path $HOME '.cargo\bin'
-  $env:Path = @($machine, $user, $cargo, $env:Path) -join ';'
+  # Keep caller PATH first (for portable tools and CI stub binaries), then
+  # add any newly installed user/machine paths. Do not lose the VS dev shell.
+  $env:Path = (@($env:Path, $cargo, $user, $machine) |
+    Where-Object { $_ }) -join ';'
 }
 
 function Native([string]$tool, [string[]]$arguments) {
   Log ("Running: " + $tool + " " + ($arguments -join ' '))
-  & $tool @arguments
-  if ($LASTEXITCODE -ne 0) {
-    Die "$tool failed with exit code $LASTEXITCODE"
+  # Do not convert harmless native stderr (npm/cargo/rustup emit progress here)
+  # into terminating PowerShell errors. The actual exit code remains fatal.
+  $previousPreference = $ErrorActionPreference
+  $exitCode = 1
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $tool @arguments
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  if ($exitCode -ne 0) {
+    Die "$tool failed with exit code $exitCode"
   }
 }
 
@@ -41,19 +96,24 @@ function Install-Winget([string]$id, [string[]]$extra = @()) {
 
 function Test-Node {
   if (-not (Has 'node.exe') -or -not (Has 'npm.cmd')) { return $false }
-  $version = & node.exe --version 2>$null
-  if ($version -match '^v([0-9]+)\.') { return ([int]$Matches[1] -ge 22) }
+  $probe = Probe 'node.exe' '--version'
+  if ($probe.ExitCode -ne 0) { return $false }
+  if ($probe.Output.Trim() -match '^v([0-9]+)\.') { return ([int]$Matches[1] -ge 22) }
   return $false
 }
 
 function Get-Python {
   if (Has 'py.exe') {
-    $location = & py.exe -3 -c 'import sys; print(sys.executable)' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $location) { return ($location | Select-Object -First 1).Trim() }
+    $probe = Probe 'py.exe' '-3 -c "import sys; print(sys.executable)"'
+    if ($probe.ExitCode -eq 0 -and $probe.Output.Trim()) {
+      return ($probe.Output.Trim() -split "[`r`n]+")[0]
+    }
   }
   if (Has 'python.exe') {
-    $location = & python.exe -c 'import sys; print(sys.executable)' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $location) { return ($location | Select-Object -First 1).Trim() }
+    $probe = Probe 'python.exe' '-c "import sys; print(sys.executable)"'
+    if ($probe.ExitCode -eq 0 -and $probe.Output.Trim()) {
+      return ($probe.Output.Trim() -split "[`r`n]+")[0]
+    }
   }
   return $null
 }
@@ -62,22 +122,33 @@ function Get-Msvc {
   $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
   $vswhere = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe'
   if (-not (Test-Path -LiteralPath $vswhere)) { return $null }
-  $args = @('-latest', '-products', '*', '-requires',
-    'Microsoft.VisualStudio.Component.VC.Tools.x86.x64')
-  $path = & $vswhere @args -property installationPath
-  if ($LASTEXITCODE -ne 0 -or -not $path) { return $null }
-  $version = & $vswhere @args -property installationVersion
-  if ($LASTEXITCODE -ne 0 -or -not $version) { return $null }
+  $whereArgs = '-latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+  $path = Probe $vswhere ($whereArgs + ' -property installationPath')
+  if ($path.ExitCode -ne 0 -or -not $path.Output.Trim()) { return $null }
+  $version = Probe $vswhere ($whereArgs + ' -property installationVersion')
+  if ($version.ExitCode -ne 0 -or -not $version.Output.Trim()) { return $null }
   return [pscustomobject]@{
-    Path = ($path | Select-Object -First 1).Trim()
-    Version = ($version | Select-Object -First 1).Trim()
+    Path = $path.Output.Trim()
+    Version = $version.Output.Trim()
   }
 }
 
 function Test-Rust {
   if (-not (Has 'rustc.exe') -or -not (Has 'cargo.exe')) { return $false }
-  $info = (& rustc.exe -vV 2>$null) -join [Environment]::NewLine
-  return ($LASTEXITCODE -eq 0 -and $info.Contains('host: x86_64-pc-windows-msvc'))
+  if (Has 'rustup.exe') {
+    # "rustc -vV" through the rustup shim may synchronize channels. List
+    # locally installed toolchains first; do not download anything in -Check.
+    $list = Probe 'rustup.exe' 'toolchain list'
+    if ($list.ExitCode -ne 0 -or
+        $list.Output -notmatch '(?m)^stable-x86_64-pc-windows-msvc(?:\s|$)') {
+      return $false
+    }
+    $info = Probe 'rustup.exe' 'run stable-x86_64-pc-windows-msvc rustc -vV'
+  } else {
+    $info = Probe 'rustc.exe' '-vV'
+  }
+  return ($info.ExitCode -eq 0 -and
+    $info.Output.Contains('host: x86_64-pc-windows-msvc'))
 }
 
 function Test-WebView2 {
@@ -162,8 +233,11 @@ try {
 
   Refresh-Path
   if (Has 'rustup.exe') {
-    $installed = (& rustup.exe toolchain list) -join [Environment]::NewLine
-    if ($installed -notmatch 'stable-x86_64-pc-windows-msvc') {
+    $list = Probe 'rustup.exe' 'toolchain list'
+    if ($list.ExitCode -ne 0) {
+      Die ('Unable to list Rust toolchains: ' + $list.ErrorText)
+    }
+    if ($list.Output -notmatch '(?m)^stable-x86_64-pc-windows-msvc(?:\s|$)') {
       Native 'rustup.exe' @('toolchain','install','stable-x86_64-pc-windows-msvc','--profile','minimal')
     }
   }
