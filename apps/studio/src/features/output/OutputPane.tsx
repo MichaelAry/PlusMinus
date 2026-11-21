@@ -36,6 +36,9 @@ function OutputContents({ view, setView, response, transportError, runningJob }:
       </nav>
       <div className="result-body">
         {transportError && <div className="error-note" role="alert">Backend: {transportError}</div>}
+        {response?.history_error && <div className="error-note" role="alert">
+          Execution finished, but history was not saved: {response.history_error}
+        </div>}
         {runningJob && <div className="muted-note">Executing native process…</div>}
         {!report && !runningJob && !transportError && <div className="empty-state">Run a PlusMinus program to see native output and metrics.</div>}
         {report && view === "output" && <pre>{renderOutput(report)}</pre>}
@@ -45,6 +48,7 @@ function OutputContents({ view, setView, response, transportError, runningJob }:
               {report.ok ? "EXECUTION COMPLETED" : "EXECUTION FAILED"}
             </div>
             {report.error && <pre className="diagnostic-error">{report.error}</pre>}
+            {response?.stderr && <pre className="diagnostic-error">Native stderr: {response.stderr}</pre>}
             {report.diagnostics.length ? report.diagnostics.map((d, i) =>
               <div key={i} className="diagnostic-line">{d.phase} · {d.line}:{d.column} · {d.message}</div>) :
               <div className="muted-note">No compiler diagnostics.</div>}

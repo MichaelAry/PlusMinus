@@ -91,6 +91,24 @@ export function streamOutput(content: string): Record<string, unknown> {
 export function errorOutput(content: string): Record<string, unknown> {
   return { output_type: "error", ename:"PlusMinusError",evalue:content,traceback:[content] };
 }
+/** Match Studio 4/Jupyter nbformat: a return value is not stdout. "0" is significant. */
+export function executeResultOutput(value: string, executionCount: number): Record<string, unknown> {
+  return { output_type: "execute_result", execution_count: executionCount,
+    data: { "text/plain": value }, metadata: {} };
+}
+/** Preserve display of saved Studio 4 notebooks, including text/plain array payloads. */
+export function outputText(output: Record<string, unknown>): string {
+  const value = output.text ?? output.evalue;
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value.every(item => typeof item === "string")) return value.join("");
+  const data = output.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const plain = (data as Record<string, unknown>)["text/plain"];
+    if (typeof plain === "string") return plain;
+    if (Array.isArray(plain) && plain.every(item => typeof item === "string")) return plain.join("");
+  }
+  return "";
+}
 
 /** Recover unsaved edits when a Dockview notebook panel is closed/reopened.
  * This is process-local (no silent file writes or replacement of original .ipynb). */

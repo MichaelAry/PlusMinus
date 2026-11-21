@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { freshNotebook, encodeNotebook, validateNotebook, makeCell, rememberNotebookDraft, recoverNotebookDraft, latestNotebookDraft, discardWorkspaceNotebooks, hasUnsavedNotebookDrafts } from "./notebook";
+import { freshNotebook, encodeNotebook, validateNotebook, makeCell, rememberNotebookDraft, recoverNotebookDraft, latestNotebookDraft, discardWorkspaceNotebooks, hasUnsavedNotebookDrafts, executeResultOutput, outputText } from "./notebook";
 describe("notebook v4 compatibility",()=>{
   it("round-trips PlusMinus notebook without discarding custom metadata",()=>{
     const n=freshNotebook();
@@ -42,5 +42,23 @@ describe("legacy notebook identity and in-memory draft preservation",()=>{
     expect(recoverNotebookDraft("/workspace","research.ipynb")).toBe(draft);
     discardWorkspaceNotebooks("/workspace");
     expect(hasUnsavedNotebookDrafts("/workspace")).toBe(false);
+  });
+});
+
+describe("Studio 4 Jupyter output parity",()=>{
+  it("persists an isolated runner return value even when it is numeric zero",()=>{
+    const output=executeResultOutput("0",2);
+    expect(output).toEqual({output_type:"execute_result",execution_count:2,
+      data:{"text/plain":"0"},metadata:{}});
+    expect(outputText(output)).toBe("0");
+    const saved=JSON.parse(JSON.stringify(output));
+    expect(outputText(saved)).toBe("0");
+  });
+  it("displays legacy Qt notebook output and Jupyter text arrays",()=>{
+    expect(outputText({output_type:"execute_result",data:{"text/plain":["first", " second"]}}))
+      .toBe("first second");
+    expect(outputText({output_type:"stream",text:["hello","\n"]})).toBe("hello\n");
+    expect(outputText({output_type:"error",evalue:"compile: invalid token"}))
+      .toBe("compile: invalid token");
   });
 });

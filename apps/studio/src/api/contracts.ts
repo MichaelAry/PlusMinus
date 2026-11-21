@@ -42,6 +42,10 @@ export interface RunResponse {
   report: RunnerReport;
   exit_code: number | null;
   wall_ms: number;
+  /** Native child stderr, separate from the authoritative runner JSON. */
+  stderr: string;
+  /** Native execution can succeed even if the history database is unavailable. */
+  history_error: string | null;
 }
 
 export interface Document {

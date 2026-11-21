@@ -141,7 +141,8 @@ export default function App() {
     try{
       const result=await native.runSource(job,doc.source,override??state.mode,10000);
       finished(job,result,null);
-      setMessage(result.report.ok?"Native execution completed":"PlusMinus error — see Diagnostics");
+      setMessage(result.history_error?"Execution finished, but history could not be saved — see Results":
+        result.report.ok?"Native execution completed":"PlusMinus error — see Diagnostics");
     }catch(e){finished(job,null,String(e));setMessage("Execution failed: "+String(e));}
     showPanel("results");
   },[started,finished,showPanel]);

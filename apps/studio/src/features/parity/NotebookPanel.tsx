@@ -4,7 +4,7 @@ import { monaco } from "../editor/monaco";
 import { native } from "../../api/native";
 import { parity, freshJobId } from "../../api/parity";
 import { useStudio } from "../../model/studio";
-import { freshNotebook, validateNotebook, encodeNotebook, withCell, makeCell, sourceText, streamOutput, errorOutput,
+import { freshNotebook, validateNotebook, encodeNotebook, withCell, makeCell, sourceText, streamOutput, errorOutput, executeResultOutput, outputText,
   rememberNotebookDraft, recoverNotebookDraft, latestNotebookDraft, discardNotebookDraft,
   type Notebook, type NotebookCell } from "../../model/notebook";
 
@@ -173,10 +173,14 @@ export function NotebookPanel(){
       const output:Record<string,unknown>[]=[];
       if(report.report.output)output.push(streamOutput(report.report.output));
       if(!report.report.ok)output.push(errorOutput(report.report.error));
+      const executionCount=(cell.execution_count??0)+1;
+      if(report.report.ok && report.report.result!=="") {
+        output.push(executeResultOutput(report.report.result,executionCount));
+      }
       const latest=current.current;
       const actualIndex=latest?.cells.findIndex(c=>c.id===cell.id)??-1;
       if(latest&&actualIndex>=0){
-        let updated=withCell(latest,actualIndex,c=>({...c,execution_count:(c.execution_count??0)+1,
+        let updated=withCell(latest,actualIndex,c=>({...c,execution_count:executionCount,
           outputs:output,metadata:{...c.metadata,plusminus:{execution_mode:"isolated",metrics:report.report.metrics}}}));
         const hasLaterCode=updated.cells.slice(actualIndex+1).some(c=>c.cell_type==="code");
         if(!hasLaterCode){
@@ -242,7 +246,7 @@ export function NotebookPanel(){
               <div className="notebook-markdown"><ReactMarkdown>{value}</ReactMarkdown></div></>}
             {stale[cell.id]&&<div className="lab-error">Output is stale (source edited since execution)</div>}
             {cell.cell_type==="code" && <pre className="notebook-output">{
-              (cell.outputs??[]).map(out=>String(out.text??out.evalue??"")).join("\n")||"(no cell output)"
+              (cell.outputs??[]).map(outputText).filter(Boolean).join("\n")||"(no cell output)"
             }</pre>}
           </section>;
         })}

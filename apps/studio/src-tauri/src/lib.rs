@@ -53,15 +53,20 @@ async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: proc
     let id = request.job_id.clone();
     let category = format!("{:?}",request.mode);
     let source = request.source.clone();
-    let result = process::execute(&app, request, token.clone()).await;
+    let mut result = process::execute(&app, request, token.clone()).await;
     let was_canceled = token.is_cancelled();
-    if let Ok(ref report)=result {
+    if let Ok(ref mut report)=result {
         let ok=report.report["ok"].as_bool().unwrap_or(false);
         let ms=report.wall_ms;
         let details=report.report.clone();
-        let _=tauri::async_runtime::spawn_blocking(move ||
+        let persisted=tauri::async_runtime::spawn_blocking(move ||
             history::save_run(&category,"Source execution",&source,ok,ms,&details)
         ).await;
+        report.history_error=match persisted {
+            Ok(Ok(_))=>None,
+            Ok(Err(e))=>Some(e),
+            Err(e)=>Some(format!("History persistence task failed: {e}")),
+        };
     }
     let passed = result.as_ref().ok().and_then(|r|r.report["ok"].as_bool()).unwrap_or(false);
     state.tasks.advance(&id, passed)?;
