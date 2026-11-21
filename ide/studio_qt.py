@@ -870,6 +870,36 @@ class Studio(QMainWindow):
                 'Clone the repository and run Start-PlusMinus. Prebuilt applications '
                 'do not include editable C++ sources and a development toolchain.')
             return
+        # Ctrl+click navigates to a real C++ document in the central tabbed
+        # editor. The explicit Language C++ command retains the source dialog.
+        if isinstance(keyword, str) and keyword and getattr(self, 'research_mode', False):
+            from internals import source_targets, locate_target
+            choices = list(source_targets(keyword))
+            if choices:
+                if len(choices) > 1:
+                    labels = [f"{target.label} — {target.file}" for target in choices]
+                    choice, ok = QInputDialog.getItem(
+                        self, f'Implementation of {keyword}',
+                        'Open compiler or runtime implementation:', labels, 0, False)
+                    if not ok:
+                        return
+                    chosen = choices[labels.index(choice)]
+                else:
+                    chosen = choices[0]
+                try:
+                    path, line = locate_target(ROOT, chosen)
+                    self.read_file(path)
+                    block = self.editor.document().findBlockByNumber(line - 1)
+                    if block.isValid():
+                        cursor = self.editor.textCursor()
+                        cursor.setPosition(block.position())
+                        self.editor.setTextCursor(cursor)
+                        self.editor.centerCursor()
+                    self.statusBar().showMessage(
+                        f'{keyword} → {path.relative_to(ROOT)}:{line}', 7500)
+                except (OSError, ValueError) as exc:
+                    self.error(f'Cannot open C++ implementation: {exc}')
+                return
         if isinstance(keyword, bool) or not isinstance(keyword, str):
             keyword = 'if'
         if self.language_window is None:
@@ -1175,6 +1205,23 @@ class Studio(QMainWindow):
     def save_file(self):
         if not self.documents.save_current():
             return False
+        doc = self.documents.current_document()
+        if doc and doc.path:
+            path = doc.path.resolve()
+            source_tree = (ROOT / 'src').resolve()
+            header_tree = (ROOT / 'include').resolve()
+            tests_tree = (ROOT / 'tests' / 'cpp').resolve()
+            if (path.is_relative_to(source_tree) or
+                    path.is_relative_to(header_tree) or
+                    path == (ROOT / 'ide' / 'runner.cpp').resolve()):
+                self.language_source_saved(str(path))
+                # The test binary is also out of date after C++ engine changes.
+                self.native_runner = None
+                self.native_panel.summary.setText('Native C++ rebuild required')
+            elif path.is_relative_to(tests_tree):
+                self.native_runner = None
+                self.native_panel.summary.setText(
+                    'Native C++ tests changed — rebuild to run updated cases')
         self.update_analysis()
         self.statusBar().showMessage(f'Saved: {self.file}', 4000)
         return True
