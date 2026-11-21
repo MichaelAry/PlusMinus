@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useEChart } from "./useEChart";
 import { native } from "../../api/native";
 import { benchmarkStats, freshJobId } from "../../api/parity";
 import type { RunResponse } from "../../api/contracts";
@@ -18,29 +19,17 @@ export function ProfilerPanel() {
   const [latest,setLatest]=useState<RunResponse|null>(null);
   const stopRef=useRef(false);
   const pendingJob=useRef<string|null>(null);
-  const chart=useRef<HTMLDivElement>(null);
 
-  useEffect(()=>{
-    if(!chart.current||samples.length===0)return;
-    let disposed=false;
-    let instance:import("echarts").ECharts|null=null;
-    void import("echarts").then(echarts=>{
-      if(disposed||!chart.current)return;
-      instance=echarts.init(chart.current,null,{renderer:"canvas"});
-      instance.setOption({
-        backgroundColor:"transparent",
-        textStyle:{color:"#c8d0d6"},
-        tooltip:{trigger:"axis"},
-        xAxis:{type:"category",data:samples.map((_,i)=>i+1),axisLabel:{color:"#a4aab2"}},
-        yAxis:{type:"value",name:"ms",axisLabel:{color:"#a4aab2"}},
-        series:[{type:"line",smooth:false,showSymbol:true,data:samples,name:"End-to-end"}],
-      });
-    }).catch(e=>setError(String(e)));
-    return ()=>{disposed=true;instance?.dispose();};
-  },[samples]);
+
+  const chart=useEChart(samples.length?{
+    backgroundColor:"transparent",textStyle:{color:"#c8d0d6"},tooltip:{trigger:"axis"},
+    xAxis:{type:"category",data:samples.map((_,i)=>i+1),axisLabel:{color:"#a4aab2"}},
+    yAxis:{type:"value",name:"ms",axisLabel:{color:"#a4aab2"}},
+    series:[{type:"line",smooth:false,showSymbol:true,data:samples,name:"End-to-end"}],
+  }:null);
 
   async function benchmark(){
-    if(busy||!active)return;
+    if(busy||!active||(/\.(cpp|hpp|h)$/.test(active.path)))return;
     setBusy(true);stopRef.current=false;setError("");setSamples([]);setVmSamples([]);
     const collected:number[]=[],internal:number[]=[];
     try {

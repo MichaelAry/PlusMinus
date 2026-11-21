@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useEChart } from "./useEChart";
 import { parity, type ResourceSnapshot } from "../../api/parity";
 
 export function ResourcePanel(){
   const [samples,setSamples]=useState<ResourceSnapshot[]>([]);
   const [error,setError]=useState("");
-  const chart=useRef<HTMLDivElement>(null);
+
   useEffect(()=>{
     let active=true;
     const sample=async()=>{
@@ -17,27 +18,16 @@ export function ResourcePanel(){
     const timer=setInterval(()=>void sample(),1000);
     return()=>{active=false;clearInterval(timer);};
   },[]);
-  useEffect(()=>{
-    if(!chart.current||!samples.length)return;
-    let disposed=false;
-    let instance:import("echarts").ECharts|null=null;
-    void import("echarts").then(lib=>{
-      if(disposed||!chart.current)return;
-      instance=lib.init(chart.current);
-      instance.setOption({
-        textStyle:{color:"#cbd2d8"},
-        tooltip:{trigger:"axis"},
-        xAxis:{type:"category",data:samples.map((_,i)=>i+1),axisLabel:{color:"#a6b0b8"}},
-        yAxis:[{type:"value",name:"RSS MB",axisLabel:{color:"#a6b0b8"}},
-          {type:"value",name:"CPU %",axisLabel:{color:"#a6b0b8"}}],
-        series:[
-          {type:"line",name:"Rust RSS MB",showSymbol:false,data:samples.map(s=>s.rss_mb)},
-          {type:"line",name:"Rust CPU %",showSymbol:false,yAxisIndex:1,data:samples.map(s=>s.cpu_percent)},
-        ]
-      });
-    }).catch(e=>setError(String(e)));
-    return()=>{disposed=true;instance?.dispose();};
-  },[samples]);
+  const chart=useEChart(samples.length?{
+    textStyle:{color:"#cbd2d8"},tooltip:{trigger:"axis"},
+    xAxis:{type:"category",data:samples.map((_,i)=>i+1),axisLabel:{color:"#a6b0b8"}},
+    yAxis:[{type:"value",name:"RSS MB",axisLabel:{color:"#a6b0b8"}},
+      {type:"value",name:"CPU %",axisLabel:{color:"#a6b0b8"}}],
+    series:[
+      {type:"line",name:"Rust RSS MB",showSymbol:false,data:samples.map(s=>s.rss_mb)},
+      {type:"line",name:"Rust CPU %",showSymbol:false,yAxisIndex:1,data:samples.map(s=>s.cpu_percent)},
+    ],
+  }:null);
   const last=samples.at(-1);
   return <div className="lab-page">
     <header className="lab-heading"><div><small>RESEARCH / TELEMETRY</small><h2>Process Resources</h2>

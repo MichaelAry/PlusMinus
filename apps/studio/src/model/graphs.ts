@@ -21,7 +21,7 @@ export function bytecodeGraph(listing: string, limit=200): LanguageGraph {
 
 function maskNonCode(source:string):string{
   // Remove strings, // comments and /*...*/ without moving character offsets.
-  return source.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+  return source.replace(/"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
     token=>token.replace(/[^\n]/g," "));
 }
 export function callGraph(source:string): LanguageGraph{

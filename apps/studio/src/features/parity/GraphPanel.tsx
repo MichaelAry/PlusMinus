@@ -10,8 +10,13 @@ export function GraphPanel(){
   const [mode,setMode]=useState<"bytecode"|"calls">("bytecode");
   const canvas=useRef<HTMLDivElement>(null);
   const [error,setError]=useState("");
-  const graph:LanguageGraph=useMemo(()=>mode==="bytecode"?bytecodeGraph(response?.report.bytecode??""):callGraph(source),
+  const computed:LanguageGraph=useMemo(()=>mode==="bytecode"?bytecodeGraph(response?.report.bytecode??""):callGraph(source),
     [mode,response?.report.bytecode,source]);
+  const [graph,setGraph]=useState(computed);
+  useEffect(()=>{
+    const timer=setTimeout(()=>setGraph(computed),300);
+    return()=>clearTimeout(timer);
+  },[computed]);
   useEffect(()=>{
     if(!canvas.current)return;
     let disposed=false;
