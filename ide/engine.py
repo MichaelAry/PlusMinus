@@ -36,7 +36,7 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
     """Run the VM. Sampled RSS is not a guaranteed instantaneous peak."""
     start = time.perf_counter()
     cancel = cancel or threading.Event()
-    report = dict(ok=False, output='', result='', variables='', bytecode='', error='', diagnostics=[])
+    report = dict(ok=False, output='', result='', variables='', bytecode='', error='', diagnostics=[], trace=[], trace_truncated=False)
     metrics = dict(wall_ms=0.0, cpu_ms=None, peak_rss_mb=None,
                    peak_threads=None, samples=[], sample_interval_ms=40)
     process = None
@@ -44,7 +44,7 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
     try:
         if cancel.is_set():
             raise RuntimeError('Stopped by user')
-        if mode not in ('run', 'compile', 'profile'):
+        if mode not in ('run', 'compile', 'profile', 'trace'):
             raise ValueError('Unsupported execution mode')
         process = subprocess.Popen([str(Path(path).resolve()), mode], stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)

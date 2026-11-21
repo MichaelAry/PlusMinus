@@ -17,6 +17,7 @@ double VM::executeThread(const std::vector<Command>& program, size_t startIp,
     std::vector<Value> stack;
     std::vector<Frame> localStack = std::move(initialFrames);
     size_t ip = startIp;
+    const std::uint64_t traceThread = traceEnabled ? traceThreadNext.fetch_add(1, std::memory_order_relaxed) : 0;
 
     auto popNum = [&]() {
         if (stack.empty()) throw std::runtime_error("Stack underflow");
@@ -38,6 +39,14 @@ double VM::executeThread(const std::vector<Command>& program, size_t startIp,
         const Command& c = program[ip];
         if (profileEnabled)
             opcodeCounts[static_cast<std::size_t>(c.op)].fetch_add(1,std::memory_order_relaxed);
+        if (traceEnabled) {
+            const auto seen = traceSeen.fetch_add(1, std::memory_order_relaxed);
+            if (seen < TraceLimit) {
+                std::lock_guard<std::mutex> guard(traceMutex);
+                traceEvents.push_back({ip, stack.size(),
+                    static_cast<std::uint32_t>(c.op), traceThread});
+            }
+        }
         switch (c.op) {
         case OpCode::PushConst:
             if (c.isStr) stack.push_back(Value(c.str));

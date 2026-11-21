@@ -146,3 +146,7 @@ The additional Code Analysis workspace displays a zoomable control-flow graph fr
 ## Git-aware history and regression trends
 
 History & Reports contains separate panes for program runs, C++ testing sessions, and a read-only Git summary. Native session graphs visualize pass percentages and elapsed suite time across runs, while each stored session retains commit SHA, source fingerprint, platform, and per-test verdicts. The Git pane shows branch, dirty working tree, diff summary and recent commits without making changes to the repository. All Git operations are local-only and optional.
+
+## Bounded VM trace replay
+
+F7 runs the C++ VM with a thread-safe, bounded instruction trace (maximum 5,000 opcode events). Runtime Profiler has a recorded-step slider and Previous/Next controls; each event displays instruction pointer, opcode, VM thread ordinal and stack depth. Recorded events can be inspected alongside the compiled bytecode. This is *post-execution replay*, not a live source-level debugger: interactive breakpoints, variable snapshots and Step Into/Over/Out are not implemented. Trace capture may affect performance, so normal Run and Profile do not collect step traces. Output includes `trace_truncated` when the bound is reached.

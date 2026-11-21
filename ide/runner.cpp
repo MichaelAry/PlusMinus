@@ -73,7 +73,7 @@ static std::string variables(const VM& vm) {
 }
 int main(int argc, char** argv) {
     const std::string mode = argc == 2 ? argv[1] : "run";
-    if (mode != "run" && mode != "compile" && mode != "profile") { std::cerr << "Usage: plusminus_runner [run|compile|profile]\n"; return 2; }
+    if (mode != "run" && mode != "compile" && mode != "profile" && mode != "trace") { std::cerr << "Usage: plusminus_runner [run|compile|profile|trace]\n"; return 2; }
     std::string source{std::istreambuf_iterator<char>(std::cin), {}};
     std::string code, output, vars, result, error;
     std::string phase = "compile";
@@ -82,6 +82,8 @@ int main(int argc, char** argv) {
     size_t instructionCount = 0;
     size_t errorLine = 0, errorColumn = 0;
     std::string dynamicCounts = "{}";
+    std::string capturedTrace = "[]";
+    bool truncatedTrace = false;
     std::uint64_t executedInstructions = 0;
     try {
         auto compilationStart = Clock::now();
@@ -89,10 +91,11 @@ int main(int argc, char** argv) {
         compileMs = std::chrono::duration<double, std::milli>(Clock::now() - compilationStart).count();
         instructionCount = program.size();
         code = listing(program);
-        if (mode == "run" || mode == "profile") {
+        if (mode == "run" || mode == "profile" || mode == "trace") {
             phase = "runtime";
             VM vm;
-            vm.profileEnabled = (mode == "profile");
+            vm.profileEnabled = (mode == "profile" || mode == "trace");
+            vm.traceEnabled = (mode == "trace");
             auto executionStart = Clock::now();
             try { result = number(vm.run(program)); }
             catch (...) {
@@ -118,6 +121,22 @@ int main(int argc, char** argv) {
                 counts << "}";
                 dynamicCounts = counts.str();
             }
+            if (vm.traceEnabled) {
+                std::ostringstream trace;
+                trace << "[";
+                bool first = true;
+                for (const auto& event : vm.traceEvents) {
+                    if (!first) trace << ",";
+                    first = false;
+                    trace << "{\"ip\":" << event.ip
+                          << ",\"opcode\":" << quote(opcode(static_cast<OpCode>(event.opcode)))
+                          << ",\"thread\":" << event.thread
+                          << ",\"stack_depth\":" << event.stackDepth << "}";
+                }
+                trace << "]";
+                capturedTrace = trace.str();
+                truncatedTrace = vm.traceSeen.load(std::memory_order_relaxed) > vm.TraceLimit;
+            }
         }
     } catch (const CompileError& e) {
         error = phase + ": " + e.what();
@@ -139,6 +158,8 @@ int main(int argc, char** argv) {
         << ",\"variables\":" << quote(vars) << ",\"bytecode\":" << quote(code)
         << ",\"error\":" << quote(error)
         << ",\"diagnostics\":" << diagnostic.str()
+        << ",\"trace\":" << capturedTrace
+        << ",\"trace_truncated\":" << (truncatedTrace ? "true" : "false")
         << ",\"metrics\":{\"compile_ms\":" << compileMs
         << ",\"execute_ms\":" << executeMs
         << ",\"program_instructions\":" << instructionCount

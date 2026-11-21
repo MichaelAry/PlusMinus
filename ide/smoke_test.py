@@ -34,6 +34,15 @@ class Smoke(unittest.TestCase):
         self.assertFalse(r['ok'])
         self.assertIn('compile:',r['error'])
 
+    def test_bounded_instruction_trace(self):
+        report = self.run_source('x = 1 + 2; print(x);', 'trace')
+        self.assertTrue(report['ok'], report['error'])
+        self.assertTrue(report['trace'])
+        self.assertEqual(report['trace'][0]['ip'], 0)
+        self.assertTrue(all('opcode' in entry and 'thread' in entry
+                            for entry in report['trace']))
+        self.assertFalse(report['trace_truncated'])
+
     def test_timeout(self):
         r = self.run_source('while (1) {}', timeout=0.2)
         self.assertFalse(r['ok'])

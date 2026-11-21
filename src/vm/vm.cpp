@@ -11,6 +11,10 @@ double VM::run(const std::vector<Command>& program) {
     namedLocks.clear();
     threads.clear();
     for (auto& counter : opcodeCounts) counter.store(0,std::memory_order_relaxed);
+    traceSeen.store(0, std::memory_order_relaxed);
+    traceThreadNext.store(0, std::memory_order_relaxed);
+    traceEvents.clear();
+    if (traceEnabled) traceEvents.reserve(TraceLimit);
 
     // PRE-SCAN: регистрируем все функции ДО запуска потоков.
     // Это делает functions read-only во время выполнения -> безопасно без мьютекса.
