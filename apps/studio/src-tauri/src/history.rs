@@ -4,7 +4,10 @@ use rusqlite::{backup::Backup, params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, io::Write, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{fs, io::Write, path::{Path, PathBuf}, sync::Mutex, time::{Duration, SystemTime, UNIX_EPOCH}};
+
+// Guard simultaneous first-use calls from multiple Tauri worker threads.
+static DB_INITIALIZE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativeResult {
@@ -72,10 +75,14 @@ pub fn initialize() -> Result<PathBuf, String> {
 }
 
 fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
+    let _guard = DB_INITIALIZE_LOCK.lock().map_err(|_| "Database initialization lock poisoned")?;
     if !dest.exists() {
         let old = dest.with_file_name("studio.db");
-        let temp = dest.with_extension(format!("db.migration-{}.tmp", std::process::id()));
-        if temp.exists() { return Err("An unfinished migration backup exists; inspect it before retrying".into()); }
+        // Unique staging names tolerate previous crashed processes without reusing
+        // potentially corrupt temporary files.
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_default().as_nanos();
+        let temp = dest.with_extension(format!("db.migration-{}-{nonce}.tmp", std::process::id()));
         let source = if old.is_file() {
             Some(Connection::open_with_flags(&old, OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .map_err(|e| e.to_string())?)
@@ -98,8 +105,14 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
                     }
                 }
             }
-            // Complete the schema upgrade in a temporary database before publishing
-            // studio-v5.db. Failure cannot leave a partial newly-created v5 database.
+            // A copied WAL journal mode can otherwise leave committed schema changes
+            // in a temp-WAL sidecar which would NOT follow the published DB path.
+            let mode:String = new_db.query_row("PRAGMA journal_mode=DELETE", [], |r|r.get(0))
+                .map_err(|e| e.to_string())?;
+            if !mode.eq_ignore_ascii_case("delete") {
+                return Err(format!("Cannot switch staging database to rollback journal: {mode}"));
+            }
+            // Complete schema upgrades in staging before publishing studio-v5.db.
             migrate_schema(&mut new_db)?;
             Ok(())
         })();
@@ -108,9 +121,15 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
             let _ = fs::remove_file(&temp);
             return Err(e);
         }
-        // No existing v5 file is ever overwritten or reset.
-        if dest.exists() { let _ = fs::remove_file(&temp); return Err("v5 database already appeared".into()); }
-        fs::rename(&temp, &dest).map_err(|e| e.to_string())?;
+        // Atomic no-clobber publication: unlike rename on Unix, hard_link never
+        // replaces a concurrently created database from another Studio instance.
+        // Both paths share the filesystem; the staging connection has been closed.
+        match fs::hard_link(&temp, &dest) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => { let _=fs::remove_file(&temp); return Err(format!("Cannot publish v5 database: {e}")); }
+        }
+        let _=fs::remove_file(&temp);
     }
     let mut db = Connection::open(&dest).map_err(|e| e.to_string())?;
     migrate_schema(&mut db)?;
@@ -531,6 +550,23 @@ mod tests {
         assert_eq!(Sha256::digest(fs::read(&old).unwrap()),old_hash);
         drop(migrated);
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test] fn concurrent_first_use_is_idempotent() {
+        let folder=std::env::temp_dir().join(format!("studio5-init-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&folder).unwrap();
+        let destination=folder.join("studio-v5.db");
+        let handles:(Vec<_>)=(0..5).map(|_|{
+            let copy=destination.clone();
+            std::thread::spawn(move||initialize_at(copy))
+        }).collect();
+        for h in handles { assert_eq!(h.join().unwrap().unwrap(),destination); }
+        let db=Connection::open(&destination).unwrap();
+        assert_eq!(checked_schema_version(&db).unwrap(),5);
+        verify(&db).unwrap();
+        drop(db);
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test] fn rejects_future_schema_without_mutating_existing_v5_data() {
