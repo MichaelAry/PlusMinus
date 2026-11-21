@@ -7,16 +7,16 @@ mod git_view;
 mod language;
 mod user_tests;
 mod resources;
+mod tasks;
 
-use std::{collections::HashMap, path::PathBuf, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
+use std::{path::PathBuf, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
 use serde_json::Value;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 pub(crate) struct StudioState {
-    pub(crate) active_jobs: Mutex<HashMap<String, CancellationToken>>,
+    pub(crate) tasks: tasks::TaskRegistry,
     pub(crate) root: Mutex<Option<PathBuf>>,
     pub(crate) source_stale: AtomicBool,
     pub(crate) rebuilt_native: Mutex<Option<PathBuf>>,
@@ -28,12 +28,7 @@ async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: proc
     -> Result<process::RunResponse, String> {
     process::validate_request(&request)?;
     if state.source_stale.load(Ordering::SeqCst){return Err("C++ source modified; rebuild the native engine before running".into());}
-    let token = CancellationToken::new();
-    {
-        let mut jobs = state.active_jobs.lock().map_err(|e| e.to_string())?;
-        if jobs.contains_key(&request.job_id) { return Err("Duplicate job_id".into()); }
-        jobs.insert(request.job_id.clone(), token.clone());
-    }
+    let token = state.tasks.register(&request.job_id,"source",1)?;
     let id = request.job_id.clone();
     let category = format!("{:?}",request.mode);
     let source = request.source.clone();
@@ -46,14 +41,15 @@ async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: proc
             history::save_run(&category,"Source execution",&source,ok,ms,&details)
         ).await;
     }
-    state.active_jobs.lock().map_err(|e| e.to_string())?.remove(&id);
+    let passed = result.as_ref().ok().and_then(|r|r.report["ok"].as_bool()).unwrap_or(false);
+    state.tasks.advance(&id, passed)?;
+    state.tasks.complete(&id,None,false,result.as_ref().err().cloned());
     result
 }
 
 #[tauri::command]
 fn cancel_run(state: State<'_, StudioState>, job_id: String) -> Result<bool, String> {
-    let jobs = state.active_jobs.lock().map_err(|e| e.to_string())?;
-    if let Some(job) = jobs.get(&job_id) { job.cancel(); Ok(true) } else { Ok(false) }
+    state.tasks.cancel(&job_id)
 }
 
 #[tauri::command]
@@ -241,6 +237,16 @@ fn resource_snapshot(state:State<'_,StudioState>)->Result<resources::Sample,Stri
     resources::snapshot(&mut sampler)
 }
 
+
+#[tauri::command]
+fn task_snapshot(state:State<'_,StudioState>,job_id:String)->Result<Option<tasks::TaskSnapshot>,String>{
+    state.tasks.snapshot(&job_id)
+}
+#[tauri::command]
+fn list_tasks(state:State<'_,StudioState>)->Result<Vec<tasks::TaskSnapshot>,String>{
+    state.tasks.list()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -255,7 +261,7 @@ pub fn run() {
             open_workspace_document, save_workspace_document, create_notebook,
             git_summary, language_targets, rebuild_native, native_source_stale,
             list_user_tests, save_user_tests, import_user_tests, export_user_tests,
-            resource_snapshot
+            resource_snapshot, task_snapshot, list_tasks
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start PlusMinus Studio 5");

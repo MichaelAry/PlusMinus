@@ -102,6 +102,7 @@ pub async fn run_suite(app:AppHandle,job_id:String,cases:Vec<NativeCase>,
     let binary=match process::resolve_native(&app,"plusminus_native_tests"){
       Ok(p)=>p,
       Err(e)=>{
+        app.state::<StudioState>().tasks.complete(&job_id,None,false,Some(e.clone()));
         let _=on_event.send(NativeEvent::Completed{job_id,session_id:None,passed:0,failed:0,canceled:false,error:Some(e)});
         return;
       }
@@ -128,6 +129,8 @@ pub async fn run_suite(app:AppHandle,job_id:String,cases:Vec<NativeCase>,
             }
             item=jobs.join_next()=>{
                 if let Some(Ok(result))=item{
+                    let registry=app.state::<StudioState>();
+                    let _=registry.tasks.advance(&job_id,result.status=="PASS");
                     let done=results.len()+1;
                     let _=on_event.send(NativeEvent::TestFinished{job_id:job_id.clone(),result:result.clone(),done,total});
                     results.push(result);
@@ -144,6 +147,7 @@ pub async fn run_suite(app:AppHandle,job_id:String,cases:Vec<NativeCase>,
           .await.map_err(|e|e.to_string()).and_then(|r|r)
     };
     let (session_id,error)=match saved {Ok(id)=>(id,None),Err(e)=>(None,Some(e))};
+    app.state::<StudioState>().tasks.complete(&job_id,session_id,canceled,error.clone());
     let _=on_event.send(NativeEvent::Completed{job_id,session_id,passed,failed,canceled,error});
 }
 
@@ -173,19 +177,10 @@ pub async fn start_native_suite(app:AppHandle,state:State<'_,StudioState>,
     }
     let cases:Vec<_>=manifest.into_iter().filter(|c|ids.contains(&c.id)).collect();
     let root=state.root.lock().map_err(|e|e.to_string())?.clone();
-    let token=CancellationToken::new();
-    {
-        let mut jobs=state.active_jobs.lock().map_err(|e|e.to_string())?;
-        if jobs.contains_key(&job_id){return Err("Duplicate job ID".into());}
-        jobs.insert(job_id.clone(),token.clone());
-    }
-    let cleanup_app=app.clone();
-    let cleanup_id=job_id.clone();
+    let token=state.tasks.register(&job_id,"native-tests",cases.len())?;
     let return_id=job_id.clone();
     tokio::spawn(async move {
         run_suite(app,job_id,cases,label,on_event,token,root).await;
-        let state_copy=cleanup_app.state::<StudioState>();
-        if let Ok(mut jobs)=state_copy.active_jobs.lock(){jobs.remove(&cleanup_id);};
     });
     Ok(return_id)
 }
