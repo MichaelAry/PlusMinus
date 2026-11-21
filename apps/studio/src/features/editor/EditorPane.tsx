@@ -13,6 +13,8 @@ export function EditorPane() {
   const docs = useStudio((s) => s.documents);
   const select = useStudio((s) => s.select);
   const close = useStudio((s) => s.close);
+  const response = useStudio((s) => s.response);
+  const reportedSource = useStudio((s) => s.reportedSource);
   const [paneSelection,setPaneSelection]=useState<string|null>(null);
   const current = docs.find(d=>d.id===(paneSelection??activeId)) ??
     docs.find(d=>d.id===activeId) ?? docs[0];
@@ -63,6 +65,27 @@ export function EditorPane() {
     });
     return () => {if(pending)clearTimeout(pending);sub.dispose();};
   }, [modelKey]);
+
+  // Authoritative native diagnostics belong only to the exact source snapshot
+  // that produced them. Never attach late responses to another tab or edited text.
+  useEffect(() => {
+    const model = editor.current?.getModel();
+    if (!model || !current) return;
+    const valid = response && reportedSource?.id===current.id
+      && reportedSource.source===current.source;
+    const markers = valid ? response.report.diagnostics.map(d => {
+      const line=Math.max(1,Math.min(model.getLineCount(),d.line||1));
+      const column=Math.max(1,Math.min(model.getLineMaxColumn(line),d.column||1));
+      return {
+        startLineNumber:line,endLineNumber:line,
+        startColumn:column,endColumn:Math.min(model.getLineMaxColumn(line),column+1),
+        severity:d.severity==="error"?monaco.MarkerSeverity.Error:
+          d.severity==="warning"?monaco.MarkerSeverity.Warning:monaco.MarkerSeverity.Info,
+        message:d.message,source:"PlusMinus C++ compiler/runtime",
+      };
+    }) : [];
+    monaco.editor.setModelMarkers(model,"plusminus-native",markers);
+  },[modelKey,response,reportedSource,current?.id,current?.source]);
 
   useEffect(() => {
     const ids = new Set(docs.map((d) => `${workspace ?? "no-workspace"}::${d.id}`));

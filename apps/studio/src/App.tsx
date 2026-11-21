@@ -66,6 +66,9 @@ export default function App() {
     catch(e){setMessage("Workspace: "+String(e));}
   },[setEntries]);
   const chooseWorkspace=useCallback(async()=>{
+    if(useStudio.getState().runningJob){
+      setMessage("Stop the active execution before changing workspaces");return;
+    }
     if(!window.dispatchEvent(new Event("studio:workspace-switch",{cancelable:true})))return;
     if((useStudio.getState().documents.some(d=>d.dirty)||hasUnsavedNotebookDrafts(workspace))&&
       !window.confirm("Switch workspace and discard unsaved documents/notebooks?"))return;
@@ -149,7 +152,7 @@ export default function App() {
     if(state.runningJob)return;
     const doc=state.documents.find(d=>d.id===state.activeId);
     if(!doc || (doc.path && !doc.path.endsWith(".pm"))){setMessage("Select a PlusMinus .pm document to execute");return;}
-    const job=crypto.randomUUID();started(job);
+    const job=crypto.randomUUID();started(job,doc.id,doc.source);
     try{
       const result=await native.runSource(job,doc.source,override??state.mode,10000);
       finished(job,result,null);

@@ -13,6 +13,9 @@ interface StudioStore {
   activeId: string;
   mode: RunMode;
   runningJob: string | null;
+  /** Immutable identity/source captured at execution start (not active tab at response time). */
+  runningSource: {id:string;source:string} | null;
+  reportedSource: {id:string;source:string} | null;
   response: RunResponse | null;
   transportError: string | null;
   setWorkspace: (workspace: string, entries: TreeEntry[]) => void;
@@ -23,7 +26,7 @@ interface StudioStore {
   saved: (id: string, doc: Document) => void;
   select: (id: string) => void;
   setMode: (mode: RunMode) => void;
-  started: (job: string) => void;
+  started: (job: string, documentId:string, source:string) => void;
   finished: (job: string, response: RunResponse | null, error: string | null) => void;
 }
 const example = "// PlusMinus / quick experiment\nx = 10;\ny = x * 2;\nprint(y);\n";
@@ -40,11 +43,15 @@ export const useStudio = create<StudioStore>((set) => ({
   activeId: initial.id,
   mode: "run",
   runningJob: null,
+  runningSource: null,
+  reportedSource: null,
   response: null,
   transportError: null,
   setWorkspace: (workspace, entries) => set(() => {
     const fresh = newUntitled();
-    return { workspace, entries, documents: [fresh], activeId: fresh.id, response: null, transportError: null };
+    return { workspace, entries, documents: [fresh], activeId: fresh.id,
+      runningJob: null, runningSource:null, reportedSource:null,
+      response: null, transportError: null };
   }),
   setEntries: (entries) => set({ entries }),
   open: (doc) => set((s) => ({
@@ -65,7 +72,13 @@ export const useStudio = create<StudioStore>((set) => ({
   })),
   select: (activeId) => set({ activeId }),
   setMode: (mode) => set({ mode }),
-  started: (runningJob) => set({ runningJob, response: null, transportError: null }),
+  started: (runningJob, documentId, source) => set({
+    runningJob, runningSource:{id:documentId,source},reportedSource:null,
+    response:null,transportError:null,
+  }),
   finished: (job, response, error) => set((s) =>
-    s.runningJob === job ? { runningJob: null, response, transportError: error } : s),
+    s.runningJob === job ? {
+      runningJob:null, runningSource:null,
+      reportedSource:s.runningSource, response,transportError:error,
+    } : s),
 }));
