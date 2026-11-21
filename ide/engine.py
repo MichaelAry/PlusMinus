@@ -36,7 +36,7 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
     """Run the VM. Sampled RSS is not a guaranteed instantaneous peak."""
     start = time.perf_counter()
     cancel = cancel or threading.Event()
-    report = dict(ok=False, output='', result='', variables='', bytecode='', error='')
+    report = dict(ok=False, output='', result='', variables='', bytecode='', error='', diagnostics=[])
     metrics = dict(wall_ms=0.0, cpu_ms=None, peak_rss_mb=None,
                    peak_threads=None, samples=[], sample_interval_ms=40)
     process = None
