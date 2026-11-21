@@ -57,6 +57,7 @@ class NativeTestHistoryTests(unittest.TestCase):
                     PRIMARY KEY(session_id, test_id))""")
                 connection.execute("""INSERT INTO native_results
                     VALUES (1, 'Old.test', 'legacy', 'PASS', 2.0, '', 'legacy.cpp', NULL, NULL)""")
+                connection.commit()  # closing() does not commit transactions.
             store = NativeHistory(database)
             with closing(sqlite3.connect(database)) as connection:
                 columns = {r[1] for r in connection.execute("PRAGMA table_info(native_results)")}
