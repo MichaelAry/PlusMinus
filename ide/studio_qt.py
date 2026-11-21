@@ -1532,8 +1532,16 @@ class Studio(QMainWindow):
             cases = [case]
         elif selection == 'full':
             cases = list(self.native_cases)
+        elif selection == 'failed':
+            cases = self.native_panel.nonpassing_cases()
+        elif selection == 'filtered':
+            cases = self.native_panel.filtered_cases()
         else:
             cases = [c for c in self.native_cases if not c.get('slow')]
+        if not cases:
+            self.native_panel.report.setPlainText(
+                'No tests match this selection. Run quick/all tests or change filters.')
+            return
         self.cancel.clear()
         self.native_panel.last_results = {}
         self.native_panel.populate()
@@ -1578,12 +1586,33 @@ class Studio(QMainWindow):
             self.error('Select a baseline and run native C++ tests first.')
             return
         diff = self.native_history.compare(baseline, self.last_native_session)
-        lines = [f'Comparing baseline #{baseline} → session #{self.last_native_session}']
+        before, after = diff['baseline'], diff['current']
+        lines = [f'Baseline #{baseline} ({before["label"]}, {before["git_sha"][:9]})',
+                 f'Current #{self.last_native_session} ({after["label"]}, {after["git_sha"][:9]})',
+                 f'Platform: {before["platform"]} → {after["platform"]}']
+        if not diff['comparable_platform']:
+            lines.append('WARNING: performance timings across different platforms are not comparable.')
+        if before['dirty'] or after['dirty']:
+            lines.append('NOTE: at least one session contains uncommitted source changes.')
         for title, key in [('New failures','introduced'),('Fixed','fixed'),
                            ('Still failing','remaining_failures'),
-                           ('New tests','added'),('Absent tests','missing')]:
+                           ('New/only executed in current','added'),
+                           ('Not executed in current','missing')]:
             lines.append(f"{title}: {len(diff[key])}")
             lines.extend('    '+item for item in diff[key][:30])
+        if diff['comparable_platform']:
+            # Single executions are only regression signals, not a benchmark.
+            slower = sorted(
+                ((key, value) for key,value in diff['performance'].items()
+                 if value['delta_pct'] is not None
+                 and value['delta_pct'] > 20 and value['delta_ms'] > 0.5),
+                key=lambda item: item[1]['delta_ms'], reverse=True)
+            lines.append(f'Potentially slower tests (>20% and >0.5 ms): {len(slower)}')
+            for key, value in slower[:20]:
+                lines.append(
+                    f"    {key}: {value['before_ms']:.2f} → "
+                    f"{value['after_ms']:.2f} ms ({value['delta_pct']:+.1f}%, {value['metric']})")
+            lines.append('Single-run timings can vary; use repeated benchmarks to confirm regressions.')
         self.native_panel.report.setPlainText('\n'.join(lines))
 
     def open_native_source(self, identifier):
