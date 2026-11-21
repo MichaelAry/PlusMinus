@@ -39,6 +39,7 @@ export function freshNotebook(): Notebook {
 export function validateNotebook(parsed: unknown): Notebook {
   if (!parsed || typeof parsed !== "object") throw new Error("Notebook must be an object");
   const n = parsed as Notebook;
+  if (n.nbformat_minor === undefined) n.nbformat_minor = 5;
   if (n.nbformat !== 4 || !Array.isArray(n.cells) || n.cells.length > 2000) throw new Error("Only Jupyter v4 notebooks with ≤2000 cells");
   if (n.metadata?.kernelspec?.name && !n.metadata.kernelspec.name.startsWith("plusminus")) throw new Error("Notebook kernel is not PlusMinus");
   if (n.metadata?.language_info?.name && n.metadata.language_info.name !== "plusminus") throw new Error("Notebook language is not PlusMinus");

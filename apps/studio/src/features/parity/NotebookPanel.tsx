@@ -49,12 +49,11 @@ export function NotebookPanel(){
   const openRef=useRef<(path:string)=>Promise<void>>(async()=>{});
   const saveRef=useRef<()=>Promise<void>>(async()=>{});
   const open=async(p:string)=>{
-    if(dirty) {
-      if(!window.confirm("Discard unsaved notebook changes?")) return;
-      if(workspace && path) discardNotebookDraft(workspace,path);
-    }
+    if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
+    const discardPrevious=Boolean(dirty&&workspace&&path);
     const cached=workspace?recoverNotebookDraft(workspace,p):null;
     if(cached){
+      if(discardPrevious&&workspace)discardNotebookDraft(workspace,path);
       setPath(p);setNotebook(cached.notebook);current.current=cached.notebook;
       setDigest(cached.digest);setSelected(cached.selected);setStale(cached.stale);
       setDirty(true);setError("");setMessage("Recovered unsaved notebook "+p);return;
@@ -62,6 +61,7 @@ export function NotebookPanel(){
     try {
       const doc=await parity.openDocument(p);
       const parsed=validateNotebook(JSON.parse(doc.source.replace(/^\uFEFF/,"")));
+      if(discardPrevious&&workspace)discardNotebookDraft(workspace,path);
       setPath(p);setNotebook(parsed);current.current=parsed;
       setDigest(doc.digest);setDirty(false);setStale({});setSelected(0);setError("");setMessage("Opened "+p);
     }catch(e){setError(String(e));}

@@ -75,7 +75,7 @@ export default function App() {
       setWorkspace(folder,tree);
       setMessage("Workspace selected: "+folder);
     }catch(e){setMessage(String(e));}
-  },[setWorkspace]);
+  },[setWorkspace,workspace]);
   const showPanel=useCallback((name:PanelName)=>{
     const api=dockApi.current;if(!api)return;
     const id=name==="editor"?"source-editor":name==="results"?"run-results":"tool-"+name;
