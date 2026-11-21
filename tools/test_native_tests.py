@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 import sys
 
@@ -47,7 +48,7 @@ class NativeTestHistoryTests(unittest.TestCase):
     def test_existing_database_migrates_without_data_loss(self):
         with tempfile.TemporaryDirectory() as tmp:
             database = Path(tmp) / "legacy.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 connection.execute("""CREATE TABLE native_results (
                     session_id INTEGER NOT NULL, test_id TEXT NOT NULL,
                     category TEXT NOT NULL, status TEXT NOT NULL,
@@ -57,7 +58,7 @@ class NativeTestHistoryTests(unittest.TestCase):
                 connection.execute("""INSERT INTO native_results
                     VALUES (1, 'Old.test', 'legacy', 'PASS', 2.0, '', 'legacy.cpp', NULL, NULL)""")
             store = NativeHistory(database)
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 columns = {r[1] for r in connection.execute("PRAGMA table_info(native_results)")}
                 self.assertIn("test_ms", columns)
             self.assertIsNone(store.results(1)["Old.test"]["test_ms"])
