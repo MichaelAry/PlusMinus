@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton, QPlainTextEdit, QSplitter, QTableWidget, QTableWidgetItem,
     QHeaderView, QStackedWidget, QListWidget, QListWidgetItem, QTabWidget,
     QFileDialog, QMessageBox, QSpinBox, QProgressBar, QInputDialog, QComboBox,
-    QTextEdit, QAbstractItemView, QCheckBox, QCompleter,
+    QTextEdit, QAbstractItemView, QCheckBox, QCompleter, QSlider,
 )
 
 from analytics import (BUILTIN_TESTS, HistoryStore, analyze_bytecode, analyze_source,
@@ -549,6 +549,7 @@ class Studio(QMainWindow):
         toolbar_layout.addWidget(button('Save', self.save_file))
         toolbar_layout.addWidget(button('Run  F5', lambda: self.launch('run'), primary=True))
         toolbar_layout.addWidget(button('Profile  F6', lambda: self.launch('run', profile=True)))
+        toolbar_layout.addWidget(button('Trace  F7', lambda: self.launch('trace')))
         toolbar_layout.addWidget(button('Run tests', self.start_tests))
         toolbar_layout.addWidget(button('Language C++', self.open_language_internals))
         toolbar_layout.addWidget(button('Stop', self.stop))
@@ -569,6 +570,7 @@ class Studio(QMainWindow):
         self.nav.setCurrentRow(0)
         for shortcut, action in [('F5', lambda: self.launch('run')),
                                  ('F6', lambda: self.launch('run', profile=True)),
+                                  ('F7', lambda: self.launch('trace')),
                                  ('Ctrl+S', self.save_file), ('Ctrl+O', self.open_file),
                                  ('Ctrl+N', self.new_file), ('Ctrl+F', self.find_in_file),
                                   ('Ctrl+G', self.go_to_line),
@@ -735,6 +737,21 @@ class Studio(QMainWindow):
         self.opcode_chart = Plot('Executed instructions by opcode  /  profile mode')
         bottom_col.addWidget(self.opcode_chart)
         layout.addWidget(bottom, 1)
+        trace_bar = QHBoxLayout()
+        trace_bar.addWidget(button('Record execution trace  F7',
+                                   lambda: self.launch('trace')))
+        trace_bar.addWidget(button('Prev', lambda: self.trace_step(-1)))
+        trace_bar.addWidget(button('Next', lambda: self.trace_step(1)))
+        self.trace_slider = QSlider(Qt.Orientation.Horizontal)
+        self.trace_slider.setRange(0,0)
+        self.trace_slider.valueChanged.connect(self.show_trace_step)
+        trace_bar.addWidget(self.trace_slider,1)
+        layout.addLayout(trace_bar)
+        self.trace_details = QPlainTextEdit()
+        self.trace_details.setReadOnly(True)
+        self.trace_details.setMaximumHeight(90)
+        self.trace_details.setPlainText('Record a trace to replay up to 5,000 bytecode events.')
+        layout.addWidget(self.trace_details)
         return page_widget
 
     def make_resources(self):
@@ -1174,11 +1191,44 @@ class Studio(QMainWindow):
         self.cancel.clear()
         runner = self.runner
         self.spawn(lambda: execute(runner,source,'profile' if profile else mode,8.0,self.cancel),
-                   lambda report: self.show_report(report,source,'Profile' if profile else 'Run'),
-                   'Profile' if profile else 'Compile' if mode=='compile' else 'Run')
+                   lambda report: self.show_report(report,source,
+                       'Trace' if mode=='trace' else 'Profile' if profile else 'Run'),
+                   'Trace' if mode=='trace' else 'Profile' if profile else
+                   'Compile' if mode=='compile' else 'Run')
+
+    def trace_step(self, increment):
+        self.trace_slider.setValue(self.trace_slider.value() + increment)
+
+    def show_trace_step(self, index):
+        events = getattr(self,'recorded_trace',[])
+        if not 0 <= index < len(events):
+            return
+        event = events[index]
+        self.trace_details.setPlainText(
+            f"Recorded step {index+1}/{len(events)} · instruction {event['ip']}"
+            f" · {event['opcode']} · VM thread #{event['thread']}"
+            f" · stack depth {event['stack_depth']}\n"
+            'Replay shows recorded opcode positions, not live breakpoints or variable snapshots.')
+        listing = self.bytecode.toPlainText().splitlines()
+        if 0 <= event['ip'] < len(listing):
+            block = self.bytecode.document().findBlockByNumber(event['ip'])
+            if block.isValid():
+                cursor = self.bytecode.textCursor()
+                cursor.setPosition(block.position())
+                self.bytecode.setTextCursor(cursor)
+                self.bytecode.centerCursor()
 
     def show_report(self, report, source, category='Run'):
         self.last_report = report
+        self.recorded_trace = report.get('trace') or []
+        self.trace_slider.setRange(0,max(0,len(self.recorded_trace)-1))
+        if self.recorded_trace:
+            self.trace_slider.setValue(0)
+            self.show_trace_step(0)
+            if report.get('trace_truncated'):
+                self.trace_details.appendPlainText('Trace capped at 5,000 recorded events.')
+        else:
+            self.trace_details.setPlainText('No recorded trace; press F7 to capture.')
         self.output.setPlainText(report['output'] + (f"\nReturn: {report['result']}" if report['result'] else ''))
         self.diagnostics.setPlainText(report['error'] or 'Execution successful; no runtime diagnostics.')
         self.present_problems(
@@ -1224,7 +1274,7 @@ class Studio(QMainWindow):
                 f"\nExecuted instructions (instrumented): {metrics.get('executed_instructions',0)}")
         self.statusBar().showMessage(f"{'PASS' if report['ok'] else 'ERROR'}  ·  {report['ms']:.2f} ms",6000)
         self.refresh_history()
-        self.nav.setCurrentRow(3 if category == 'Profile' else 1)
+        self.nav.setCurrentRow(3 if category in ('Profile','Trace') else 1)
 
     def stop(self):
         self.cancel.set()

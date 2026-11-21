@@ -40,6 +40,18 @@ public:
     static constexpr std::size_t OpcodeCount = static_cast<std::size_t>(OpCode::Halt) + 1;
     std::array<std::atomic<std::uint64_t>, OpcodeCount> opcodeCounts{};
 
+    struct TraceEvent {
+        std::size_t ip, stackDepth;
+        std::uint32_t opcode;
+        std::uint64_t thread;
+    };
+    bool traceEnabled = false;
+    static constexpr std::size_t TraceLimit = 5000;
+    std::atomic<std::uint64_t> traceSeen{0};
+    std::atomic<std::uint64_t> traceThreadNext{0};
+    std::mutex traceMutex;
+    std::vector<TraceEvent> traceEvents;
+
     double run(const std::vector<Command>& program);
 
 private:
