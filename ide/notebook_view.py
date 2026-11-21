@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit,
+    QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit,
     QPushButton, QScrollArea, QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -23,6 +23,20 @@ from notebook_format import (
     error_output, load_notebook, make_cell, new_notebook, serialize, source_text,
     stream_output,
 )
+
+
+class CellEditor(QPlainTextEdit):
+    """Run current cell with Shift+Enter or Ctrl+Enter, as in Jupyter."""
+    executeRequested = Signal()
+
+    def keyPressEvent(self, event):
+        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and
+                event.modifiers() & (
+                    Qt.KeyboardModifier.ShiftModifier |
+                    Qt.KeyboardModifier.ControlModifier)):
+            self.executeRequested.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class CellJob(QThread):
@@ -69,7 +83,8 @@ class NotebookCell(QFrame):
         remove.clicked.connect(lambda: self.deleteRequested.emit(self))
         header.addWidget(remove)
         layout.addLayout(header)
-        self.editor = QPlainTextEdit()
+        self.editor = CellEditor()
+        self.editor.executeRequested.connect(self._clicked)
         self.editor.setPlaceholderText(
             "PlusMinus code" if self.kind == "code" else "Markdown text")
         self.editor.setPlainText(source_text(self.data.get("source", "")))
@@ -86,7 +101,11 @@ class NotebookCell(QFrame):
         self.output.setReadOnly(True)
         self.output.setMaximumHeight(145)
         layout.addWidget(self.output)
-        self.editor.textChanged.connect(self.changed.emit)
+        self.stats = QLabel()
+        self.stats.setObjectName("muted")
+        self.stats.setWordWrap(True)
+        layout.addWidget(self.stats)
+        self.editor.textChanged.connect(self._edited)
         self.show_saved_output()
         self.update_title()
 
@@ -96,6 +115,11 @@ class NotebookCell(QFrame):
             self.title.setText("CODE  /  In [" + (str(count) if count is not None else " ") + "]")
         else:
             self.title.setText("MARKDOWN")
+
+    def _edited(self):
+        if self.kind == "code" and self.data.get("execution_count") is not None:
+            self.stats.setText("Code changed — previous output and timings may be stale.")
+        self.changed.emit()
 
     def _clicked(self):
         if self.kind == "code":
@@ -124,10 +148,34 @@ class NotebookCell(QFrame):
             elif kind == "error":
                 lines.append(str(output.get("evalue", "Execution error")))
             elif kind in ("execute_result", "display_data"):
-                lines.append(source_text(output.get("data", {}).get("text/plain", "")))
+                data = output.get("data", {})
+                if not isinstance(data, dict):
+                    continue
+                try:
+                    lines.append(source_text(data.get("text/plain", "")))
+                except ValueError:
+                    continue
         text = "\n".join(lines).strip()
+        if self.kind == "code" and self.data.get("execution_count") is not None and not text:
+            text = "(Completed without stdout or a return value.)"
         self.output.setPlainText(text)
         self.output.setVisible(bool(text))
+        record = self.data.get("metadata", {}).get("plusminus_run", {})
+        if not isinstance(record, dict):
+            record = {}
+        if record:
+            from execution_report import _measured
+            metrics = record.get("metrics") or {}
+            if not isinstance(metrics, dict):
+                metrics = {}
+            self.stats.setText(
+                f"{'PASS' if record.get('ok') else 'FAIL'} · "
+                f"Wall {_measured(record.get('wall_ms'), 'ms')} · "
+                f"Compile {_measured(metrics.get('compile_ms'), 'ms')} · "
+                f"VM {_measured(metrics.get('execute_ms'), 'ms')} · "
+                f"Sampled RSS {_measured(metrics.get('peak_rss_mb'), 'MB')}")
+        else:
+            self.stats.clear()
 
     def set_report(self, report, counter):
         self.data["execution_count"] = counter
@@ -136,11 +184,21 @@ class NotebookCell(QFrame):
             outputs.append(stream_output(report["output"]))
         if not report.get("ok"):
             outputs.append(error_output(report.get("error") or "Execution failed"))
-        if not outputs:
-            outputs.append(stream_output(
-                "Execution completed. Result: " + str(report.get("result", ""))
-                if report.get("ok") else "No output"))
+        result = report.get("result")
+        if report.get("ok") and result is not None and result != "":
+            outputs.append({
+                "output_type": "execute_result",
+                "execution_count": counter,
+                "data": {"text/plain": str(result)}, "metadata": {},
+            })
         self.data["outputs"] = outputs
+        metrics = report.get("metrics") or {}
+        self.data.setdefault("metadata", {})["plusminus_run"] = {
+            "ok": bool(report.get("ok")), "wall_ms": report.get("ms"),
+            "metrics": {key: value for key, value in metrics.items()
+                        if key in ("compile_ms", "execute_ms", "cpu_ms",
+                                   "peak_rss_mb", "peak_threads")},
+        }
         self.show_saved_output()
         self.update_title()
 
@@ -148,9 +206,12 @@ class NotebookCell(QFrame):
 class NotebookView(QWidget):
     statusChanged = Signal(str)
 
-    def __init__(self, root, parent=None):
+    def __init__(self, root, parent=None, runner_provider=None):
         super().__init__(parent)
         self.root = Path(root)
+        # Use the Studio controller's validated runner to avoid stale native
+        # executables after editing the interpreter's C++ implementation.
+        self.runner_provider = runner_provider or find_runner
         self.path = None
         self.notebook = new_notebook()
         self.cells = []
@@ -246,24 +307,24 @@ class NotebookView(QWidget):
         return result
 
     def maybe_close(self):
+        # Do not interrupt an execution if the user declines closing.
+        if self.dirty:
+            answer = QMessageBox.question(
+                self, "Notebook changes", "Save notebook changes?",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save)
+            if answer == QMessageBox.StandardButton.Cancel:
+                return False
+            if answer == QMessageBox.StandardButton.Save and not self.save_file():
+                return False
         self.interrupt()
         if self.worker and self.worker.isRunning():
             if not self.worker.wait(6500):
                 QMessageBox.warning(self, "Notebook is executing",
                                     "The native kernel is still shutting down.")
                 return False
-        if not self.dirty:
-            return True
-        answer = QMessageBox.question(
-            self, "Notebook changes", "Save notebook changes?",
-            QMessageBox.StandardButton.Save |
-            QMessageBox.StandardButton.Discard |
-            QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save)
-        if answer == QMessageBox.StandardButton.Cancel:
-            return False
-        if answer == QMessageBox.StandardButton.Save:
-            return self.save_file()
         return True
 
     def new_file(self):
@@ -284,6 +345,8 @@ class NotebookView(QWidget):
              if cell["cell_type"] == "code"), default=0)
         for entry in data["cells"]:
             self.add_cell(entry["cell_type"], data=entry, mark_dirty=False)
+        if not self.cells:
+            self.add_cell("code", mark_dirty=False)
         self.dirty = False
         self._rename()
 
@@ -339,12 +402,29 @@ class NotebookView(QWidget):
     def run_all(self):
         if self.worker and self.worker.isRunning():
             return
-        self.run_queue = [cell for cell in self.cells if cell.kind == "code"]
+        self.run_queue = [cell for cell in self.cells
+                          if cell.kind == "code" and cell.editor.toPlainText().strip()]
         self._next()
+
+    def run_focused_cell(self):
+        """F5 targets the current code editor, never a hidden source document."""
+        focus = QApplication.focusWidget()
+        cell = next((item for item in self.cells
+                     if item.editor is focus), None)
+        if cell is None or cell.kind != "code":
+            cell = next((item for item in reversed(self.cells)
+                         if item.kind == "code" and item.editor.toPlainText().strip()), None)
+        if cell:
+            self.run_cell(cell)
+        else:
+            self.status.setText("Enter PlusMinus code in a cell before running.")
 
     def run_cell(self, cell):
         if self.worker and self.worker.isRunning():
             self.status.setText("An execution is already running.")
+            return
+        if cell.kind != "code" or not cell.editor.toPlainText().strip():
+            self.status.setText("Empty code cell — enter PlusMinus source first.")
             return
         self.run_queue = [cell]
         self._next()
@@ -353,7 +433,7 @@ class NotebookView(QWidget):
         if not self.run_queue:
             self.status.setText("Kernel: isolated · idle")
             return
-        runner = find_runner()
+        runner = self.runner_provider()
         if runner is None:
             self.run_queue.clear()
             self.status.setText("C++ runner unavailable: rebuild the project first.")
@@ -362,7 +442,8 @@ class NotebookView(QWidget):
         self.cancel.clear()
         self.status.setText("Kernel: isolated · executing a code cell…")
         self.active_cell.run_button.setEnabled(False)
-        self.worker = CellJob(runner, self.active_cell.editor.toPlainText(),
+        self.executed_source = self.active_cell.editor.toPlainText()
+        self.worker = CellJob(runner, self.executed_source,
                               self.cancel, self)
         self.worker.completed.connect(self._result)
         self.worker.finished.connect(self._finished)
@@ -374,7 +455,18 @@ class NotebookView(QWidget):
             return
         self.execution_count += 1
         cell.set_report(report, self.execution_count)
+        if cell.editor.toPlainText() != self.executed_source:
+            cell.stats.setText(
+                "Code changed during execution — results belong to the earlier source.")
         cell.run_button.setEnabled(True)
+        # Each completed final code cell gets exactly one following blank cell.
+        # Re-running a cell must not keep generating empty cells.
+        if (not self.cancel.is_set() and cell in self.cells and
+                not any(next_cell.kind == "code"
+                        for next_cell in self.cells[self.cells.index(cell) + 1:])):
+            new_cell = self.add_cell("code", mark_dirty=False)
+            new_cell.editor.setFocus()
+            self.scroll.ensureWidgetVisible(new_cell, 0, 24)
         self._changed()
         ok = bool(report.get("ok"))
         self.statusChanged.emit("Notebook cell passed" if ok else

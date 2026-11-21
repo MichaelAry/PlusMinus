@@ -42,6 +42,7 @@ from graph_view import GraphView
 from git_view import GitPanel
 from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
+from execution_report import render_output, render_details
 
 try:
     import psutil
@@ -476,6 +477,7 @@ class Studio(QMainWindow):
         self.runner = find_runner()
         self.language_window = None
         self.native_building = False
+        self.native_stale = False
         self.file = None
         self.saved = EXAMPLE
         self.last_report = None
@@ -628,6 +630,15 @@ class Studio(QMainWindow):
         results = QTabWidget()
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
+        self.output.setPlaceholderText("Run the current program to see stdout and its return value.")
+        self.run_details = QPlainTextEdit()
+        self.run_details.setReadOnly(True)
+        self.run_details.setPlainText(
+            "Run a program (F5) to see actual C++ compilation, execution and process metrics.")
+        self.run_report_widget = QSplitter(Qt.Orientation.Horizontal)
+        self.run_report_widget.addWidget(self.output)
+        self.run_report_widget.addWidget(self.run_details)
+        self.run_report_widget.setSizes([600, 420])
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
         problems_widget = QWidget()
@@ -641,8 +652,9 @@ class Studio(QMainWindow):
         self.bytecode.setReadOnly(True)
         self.variables = QPlainTextEdit()
         self.variables.setReadOnly(True)
-        for title, widget in [('Output',self.output),('Problems',problems_widget),
-                              ('Bytecode',self.bytecode),('Variables',self.variables)]:
+        for title, widget in [('Run / Metrics', self.run_report_widget),
+                              ('Problems', problems_widget),
+                              ('Bytecode', self.bytecode), ('Variables', self.variables)]:
             results.addTab(widget,title)
         self.result_tabs = results
         if getattr(self, 'research_mode', False):
@@ -843,16 +855,17 @@ class Studio(QMainWindow):
             self.editor.centerCursor()
             self.nav.setCurrentRow(1)
 
-    def spawn(self, work, success, title):
+    def spawn(self, work, success, title, failure=None):
         job = Job(work)
         self.jobs.append(job)
         if hasattr(self, 'task_center'):
             self.task_center.track(job, title)
         job.complete.connect(success)
-        job.failed.connect(lambda text: self.error(f'{title} failed: {text}'))
+        job.failed.connect(failure or (lambda text: self.error(f'{title} failed: {text}')))
         job.finished.connect(lambda j=job: self.finished_job(j))
         self.statusBar().showMessage(f'{title} running in background...')
         job.start()
+        return job
 
     def finished_job(self, job):
         if job in self.jobs:
@@ -912,8 +925,11 @@ class Studio(QMainWindow):
         self.language_window.activateWindow()
 
     def language_source_saved(self, path):
-        # Do not accidentally execute a stale VM after modifying its C++ code.
+        # Do not accidentally execute a stale VM or old native tests after C++ edits.
         self.runner = None
+        self.native_stale = True
+        self.native_runner = None
+        self.native_panel.summary.setText('C++ source modified — rebuild before testing')
         self.engine_status.setText('● Native source changed / rebuild required')
         self.statusBar().showMessage(f'Interpreter source saved: {path}', 9000)
         if self.language_window and self.language_window.auto_build.isChecked():
@@ -930,7 +946,9 @@ class Studio(QMainWindow):
             self.error('Wait for running tests/programs to finish, then click Rebuild & test.')
             return
         self.native_building = True
+        self.native_stale = True
         self.runner = None
+        self.native_runner = None
         self.engine_status.setText('● Rebuilding C++ interpreter...')
         def work():
             try:
@@ -958,6 +976,7 @@ class Studio(QMainWindow):
         if self.runner is None:
             self.error('C++ build reported success but did not produce a runner.')
             return
+        self.native_stale = False
         self.engine_status.setText('● Runtime rebuilt')
         self.statusBar().showMessage('C++ interpreter rebuilt. Rerunning built-in tests.',10000)
         self.start_tests(startup=True)
@@ -1203,6 +1222,9 @@ class Studio(QMainWindow):
         self.nav.setCurrentRow(1)
 
     def save_file(self):
+        # Saving an unmodified C++ file must not invalidate a working VM.
+        before = self.documents.current_document()
+        changed = bool(before and before.modified)
         if not self.documents.save_current():
             return False
         doc = self.documents.current_document()
@@ -1211,14 +1233,16 @@ class Studio(QMainWindow):
             source_tree = (ROOT / 'src').resolve()
             header_tree = (ROOT / 'include').resolve()
             tests_tree = (ROOT / 'tests' / 'cpp').resolve()
-            if (path.is_relative_to(source_tree) or
+            if changed and (
+                    path.is_relative_to(source_tree) or
                     path.is_relative_to(header_tree) or
                     path == (ROOT / 'ide' / 'runner.cpp').resolve()):
                 self.language_source_saved(str(path))
                 # The test binary is also out of date after C++ engine changes.
                 self.native_runner = None
                 self.native_panel.summary.setText('Native C++ rebuild required')
-            elif path.is_relative_to(tests_tree):
+            elif changed and path.is_relative_to(tests_tree):
+                self.native_stale = True
                 self.native_runner = None
                 self.native_panel.summary.setText(
                     'Native C++ tests changed — rebuild to run updated cases')
@@ -1263,18 +1287,73 @@ class Studio(QMainWindow):
         except OSError as exc:
             self.error(f'History database unavailable: {exc}')
 
+    def save_active(self):
+        """Save the currently visible document, not a hidden source tab."""
+        if self.nav.currentRow() == 8 and hasattr(self, 'notebooks'):
+            return self.notebooks.save_file()
+        return self.save_file()
+
+    def run_active(self, mode='run', profile=False):
+        """F5 executes a notebook cell when the notebook workspace is active."""
+        if self.nav.currentRow() == 8 and hasattr(self, 'notebooks'):
+            if mode == 'run' and not profile:
+                self.notebooks.run_focused_cell()
+            else:
+                self.statusBar().showMessage(
+                    'Profiling/trace requires a PlusMinus source file in Develop.', 7000)
+            return
+        self.launch(mode, profile)
+
+    def reveal_run_report(self):
+        """A run must always reveal stdout and metrics, even if a dock was hidden."""
+        self.result_tabs.setCurrentWidget(self.run_report_widget)
+        if hasattr(self, 'research_controller'):
+            dock = self.research_controller.console
+            dock.show()
+            dock.raise_()
+            self.resizeDocks([dock], [255], Qt.Orientation.Vertical)
+
     def launch(self, mode='run', profile=False):
+        title = ('Trace' if mode == 'trace' else 'Profile' if profile else
+                 'Compile' if mode == 'compile' else 'Run')
+        self.reveal_run_report()
+        if self.native_building or any(
+                isinstance(job, NativeTestJob) and job.isRunning()
+                or getattr(job, 'task_kind', '') == 'suite' and job.isRunning()
+                for job in self.jobs):
+            message = 'A build or test suite is active. Finish it before running a program.'
+            self.output.setPlainText('(No execution performed)')
+            self.run_details.setPlainText(message)
+            self.statusBar().showMessage(message, 7500)
+            return
         if not self.runner:
-            self.error('C++ runner missing. Launch via Start-PlusMinus or run python launch.py.')
+            message = 'C++ runner missing or stale. Rebuild PlusMinus before executing.'
+            self.output.setPlainText('(No execution performed)')
+            self.run_details.setPlainText(message)
+            self.error(message)
+            return
+        if any(getattr(job, 'task_kind', '') == 'execution' and job.isRunning()
+               for job in self.jobs):
+            self.statusBar().showMessage('A program is already executing. Use Stop first.', 6500)
             return
         source = self.editor.toPlainText()
+        self.output.setPlainText('Executing PlusMinus program…')
+        self.run_details.setPlainText(f'{title} in progress. Waiting for actual C++ runner metrics…')
         self.cancel.clear()
         runner = self.runner
-        self.spawn(lambda: execute(runner,source,'profile' if profile else mode,8.0,self.cancel),
-                   lambda report: self.show_report(report,source,
-                       'Trace' if mode=='trace' else 'Profile' if profile else 'Run'),
-                   'Trace' if mode=='trace' else 'Profile' if profile else
-                   'Compile' if mode=='compile' else 'Run')
+
+        def failed(message):
+            self.error(f'{title} failed: {message}')
+            self.show_report({
+                'ok': False, 'output': '', 'result': '', 'variables': '',
+                'bytecode': '', 'error': str(message), 'ms': 0,
+                'trace': [], 'diagnostics': [], 'metrics': {},
+            }, source, title)
+
+        job = self.spawn(
+            lambda: execute(runner, source, 'profile' if profile else mode, 8.0, self.cancel),
+            lambda report: self.show_report(report, source, title), title, failure=failed)
+        job.task_kind = 'execution'
 
     def trace_step(self, increment):
         self.trace_slider.setValue(self.trace_slider.value() + increment)
@@ -1309,7 +1388,8 @@ class Studio(QMainWindow):
                 self.trace_details.appendPlainText('Trace capped at 5,000 recorded events.')
         else:
             self.trace_details.setPlainText('No recorded trace; press F7 to capture.')
-        self.output.setPlainText(report['output'] + (f"\nReturn: {report['result']}" if report['result'] else ''))
+        self.output.setPlainText(render_output(report))
+        self.run_details.setPlainText(render_details(report, category))
         self.diagnostics.setPlainText(report['error'] or 'Execution successful; no runtime diagnostics.')
         self.present_problems(
             analyze_diagnostics(source) + list(report.get('diagnostics') or []))
@@ -1322,7 +1402,7 @@ class Studio(QMainWindow):
                 + ('Graph truncated to keep UI responsive' if graph['truncated']
                    else 'Complete graph for compiled instructions'))
         self.variables.setPlainText(report['variables'])
-        self.result_tabs.setCurrentIndex(1 if report['error'] else 0)
+        self.result_tabs.setCurrentWidget(self.run_report_widget)
         self.record(category, self.file.name if self.file else 'Editor source', source, report)
         metrics = report.get('metrics', {})
         samples = metrics.get('samples', [])
@@ -1355,10 +1435,14 @@ class Studio(QMainWindow):
         self.statusBar().showMessage(f"{'PASS' if report['ok'] else 'ERROR'}  ·  {report['ms']:.2f} ms",6000)
         self.refresh_history()
         self.nav.setCurrentRow(3 if category in ('Profile','Trace') else 1)
+        self.reveal_run_report()
 
     def stop(self):
         self.cancel.set()
-        self.statusBar().showMessage('Stop requested. Active VM executions will be interrupted.',5000)
+        if hasattr(self, 'notebooks'):
+            self.notebooks.interrupt()
+        self.statusBar().showMessage(
+            'Stop requested. Active source and notebook VM processes will be interrupted.', 5000)
 
     def test_cases(self):
         return [(dict(case), 'Built-in') for case in BUILTIN_TESTS] + [(dict(case),'User') for case in self.user_tests]
@@ -1415,6 +1499,11 @@ class Studio(QMainWindow):
         self.run_test_batch([cases[selected]], 'Selected test')
 
     def run_test_batch(self, cases, title):
+        if any((isinstance(job, NativeTestJob) or
+                getattr(job, 'task_kind', '') in ('execution', 'suite'))
+               and job.isRunning() for job in self.jobs):
+            self.error('Another VM/test execution is running; finish it before starting tests.')
+            return
         self.cancel.clear()
         self.test_progress.setValue(0)
         self.test_summary.setText(f'{title}: executing {len(cases)} cases...')
@@ -1429,7 +1518,8 @@ class Studio(QMainWindow):
                 passed, detail = judge_test(case,report)
                 results.append((case,suite,passed,detail,report))
             return results
-        self.spawn(work, self.show_test_results, title)
+        job = self.spawn(work, self.show_test_results, title)
+        job.task_kind = 'suite'
 
     def show_test_results(self, results):
         entries = []
@@ -1504,6 +1594,10 @@ class Studio(QMainWindow):
             self.nav.setCurrentRow(1)
 
     def discover_native(self):
+        if self.native_stale:
+            self.native_panel.summary.setText(
+                'Native C++ source changed — rebuild before discovering/running tests.')
+            return
         self.native_runner = find_native_runner()
         if self.native_runner is None:
             self.native_panel.summary.setText(
@@ -1538,6 +1632,8 @@ class Studio(QMainWindow):
             if cell and cell.data(Qt.ItemDataRole.UserRole) == identifier:
                 self.native_panel.table.selectRow(row)
                 self.start_native_tests('selected')
+                if hasattr(self, 'test_analysis'):
+                    self.test_suites.setCurrentIndex(2)
                 return
         self.error(f'Native test not found: {identifier}')
 

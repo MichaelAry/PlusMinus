@@ -16,6 +16,7 @@ class NativeTestPanel(QWidget):
         super().__init__(parent)
         self.cases = []
         self.last_results = {}
+        self._row_by_id = {}
         layout = QVBoxLayout(self)
         controls = QHBoxLayout()
         self.summary = QLabel('Discovering C++ tests...')
@@ -93,11 +94,23 @@ class NativeTestPanel(QWidget):
 
     def set_result(self, result):
         self.last_results[result['id']] = result
-        self.populate()
+        if self.status_filter.currentText() == 'All statuses':
+            # Updating a row in place keeps focus/selection stable while hundreds
+            # of asynchronous native test results stream into the GUI.
+            row = self._row_by_id.get(result['id'])
+            if row is not None:
+                self.table.item(row, 2).setText(result['status'])
+                self.table.item(row, 3).setText(
+                    f"{result['elapsed_ms']:.2f}" if result.get('elapsed_ms') is not None else '—')
+        else:
+            # Status-filtered result sets need a re-evaluation of row visibility.
+            self.populate()
         total = len(self.last_results)
         passed = sum(r['status'] == 'PASS' for r in self.last_results.values())
         self.summary.setText(
             f'{passed} PASS · {total - passed} nonpassing · {max(0, len(self.cases) - total)} not run')
+        if self.selected() and self.selected()['id'] == result['id']:
+            self.show_selection_details()
 
     def filtered_cases(self):
         group = self.group_filter.currentText()
@@ -118,6 +131,7 @@ class NativeTestPanel(QWidget):
         shown = self.filtered_cases()
         selected = self.selected()
         previous = selected['id'] if selected else None
+        self._row_by_id = {case['id']: row for row, case in enumerate(shown)}
         self.table.setRowCount(len(shown))
         for row, case in enumerate(shown):
             report = self.last_results.get(case['id'], {})
