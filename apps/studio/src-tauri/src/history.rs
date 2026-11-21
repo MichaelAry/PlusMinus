@@ -310,9 +310,18 @@ pub fn compare(base_id:i64,current_id:i64)->Result<Value,String>{
     }
     for id in old.keys(){if !now.contains_key(id){missing.push(id.clone());}}
     for a in [&mut introduced,&mut fixed,&mut remaining,&mut added,&mut missing]{a.sort();}
-    let sessions=sessions(200)?.as_array().cloned().unwrap_or_default();
-    let bmeta=sessions.iter().find(|v|v["id"]==base_id).cloned().unwrap_or(Value::Null);
-    let cmeta=sessions.iter().find(|v|v["id"]==current_id).cloned().unwrap_or(Value::Null);
+    let db=connect()?;
+    let get_meta=|id:i64|->Result<Value,String>{
+       db.query_row("SELECT id,timestamp,label,git_sha,source_hash,dirty,platform,total_ms FROM native_sessions WHERE id=?1",
+         [id],|r|Ok(json!({
+            "id":r.get::<_,i64>(0)?,"timestamp":r.get::<_,String>(1)?,
+            "label":r.get::<_,String>(2)?,"git_sha":r.get::<_,String>(3)?,
+            "source_hash":r.get::<_,String>(4)?,"dirty":r.get::<_,i64>(5)?!=0,
+            "platform":r.get::<_,String>(6)?,"total_ms":r.get::<_,f64>(7)?
+         }))).map_err(|e|e.to_string())
+    };
+    let bmeta=get_meta(base_id)?;
+    let cmeta=get_meta(current_id)?;
     Ok(json!({"introduced":introduced,"fixed":fixed,"remaining_failures":remaining,
       "added":added,"missing":missing,"performance":timings,"baseline":bmeta,
       "current":cmeta,"comparable_platform":bmeta["platform"]==cmeta["platform"],
@@ -325,5 +334,19 @@ mod tests {
     #[test] fn unsupported_table_name_rejected(){
         let db=Connection::open_in_memory().unwrap();
         assert!(count_table(&db,"made_up").is_err());
+    }
+    #[test] fn sqlite_backup_preserves_original_rows(){
+        let original=Connection::open_in_memory().unwrap();
+        original.execute_batch("CREATE TABLE runs (id INTEGER PRIMARY KEY, label TEXT);
+          INSERT INTO runs(label) VALUES ('persist me');").unwrap();
+        let mut snapshot=Connection::open_in_memory().unwrap();
+        let backup=Backup::new(&original,&mut snapshot).unwrap();
+        backup.run_to_completion(32,Duration::from_millis(1),None).unwrap();
+        drop(backup);
+        assert_eq!(count_table(&original,"runs").unwrap(),1);
+        assert_eq!(count_table(&snapshot,"runs").unwrap(),1);
+        snapshot.execute("INSERT INTO runs(label) VALUES ('v5 only')",[]).unwrap();
+        assert_eq!(count_table(&original,"runs").unwrap(),1);
+        assert_eq!(count_table(&snapshot,"runs").unwrap(),2);
     }
 }

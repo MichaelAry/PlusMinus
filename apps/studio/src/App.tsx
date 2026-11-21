@@ -7,6 +7,7 @@ import { useStudio } from "./model/studio";
 import { EditorPane } from "./features/editor/EditorPane";
 import { OutputPane } from "./features/output/OutputPane";
 import { TestLab } from "./features/parity/TestLab";
+import { SourceTestsPanel } from "./features/parity/SourceTestsPanel";
 import { HistoryPanel } from "./features/parity/HistoryPanel";
 import { ProfilerPanel } from "./features/parity/ProfilerPanel";
 import { GraphPanel } from "./features/parity/GraphPanel";
@@ -16,14 +17,14 @@ import { GitPanel } from "./features/parity/GitPanel";
 import "./features/parity/ParityStyle.css";
 
 const panels = {
-  editor: EditorPane, results: OutputPane, tests: TestLab, history: HistoryPanel,
+  editor: EditorPane, results: OutputPane, tests: TestLab, sourcetests: SourceTestsPanel, history: HistoryPanel,
   profiler: ProfilerPanel, graphs: GraphPanel, notebook: NotebookPanel,
   language: LanguagePanel, git: GitPanel,
 };
 type PanelName = keyof typeof panels;
 const modes: RunMode[] = ["run","compile","profile","trace"];
 const panelTitles:Record<PanelName,string> = {
-  editor:"Editor",results:"Results",tests:"Native Test Lab",history:"History",
+  editor:"Editor",results:"Results",tests:"Native Test Lab",sourcetests:"Source Tests",history:"History",
   profiler:"Profiler",graphs:"Compiler Explorer",notebook:"Notebooks",
   language:"Language Internals",git:"Git Inspector",
 };
@@ -213,9 +214,9 @@ export default function App() {
     </header>
     <div className="main-area">
       <aside className="activity-rail" aria-label="Workspace navigation">
-        {(["editor","tests","notebook","profiler","graphs","history","language","git"] as PanelName[]).map((n,i)=>
+        {(["editor","tests","sourcetests","notebook","profiler","graphs","history","language","git"] as PanelName[]).map((n,i)=>
           <button key={n} title={panelTitles[n]} aria-label={panelTitles[n]} onClick={()=>showPanel(n)}>
-            {["⌘","✓","▤","◫","⌁","◷","✥","⑂"][i]}</button>)}
+            {["⌘","✓","≡","▤","◫","⌁","◷","✥","⑂"][i]}</button>)}
       </aside>
       <aside className="explorer">
         <div className="pane-label"><span>EXPLORER</span><button onClick={()=>void refresh()} disabled={!workspace}>↻</button></div>

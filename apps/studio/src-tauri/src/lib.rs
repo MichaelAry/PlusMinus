@@ -5,6 +5,7 @@ mod history;
 mod extra_files;
 mod git_view;
 mod language;
+mod user_tests;
 
 use std::{collections::HashMap, path::PathBuf, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
 use serde_json::Value;
@@ -207,6 +208,30 @@ fn native_source_stale(state:State<'_,StudioState>)->bool{
     state.source_stale.load(Ordering::SeqCst)
 }
 
+
+#[tauri::command]
+async fn list_user_tests()->Result<user_tests::UserBundle,String>{
+    tauri::async_runtime::spawn_blocking(user_tests::list)
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn save_user_tests(cases:Vec<user_tests::UserCase>,expected:String)
+    ->Result<user_tests::UserBundle,String>{
+    tauri::async_runtime::spawn_blocking(move||user_tests::save(cases,expected))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn import_user_tests(app:AppHandle,expected:String)
+    ->Result<user_tests::UserBundle,String>{
+    tauri::async_runtime::spawn_blocking(move||user_tests::import_file(app,expected))
+       .await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn export_user_tests(app:AppHandle)->Result<String,String>{
+    tauri::async_runtime::spawn_blocking(move||user_tests::export_file(app))
+       .await.map_err(|e|e.to_string())?
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -219,7 +244,8 @@ pub fn run() {
             history_overview, recent_runs, native_sessions, session_results,
             set_native_baseline, compare_native_sessions,
             open_workspace_document, save_workspace_document, create_notebook,
-            git_summary, language_targets, rebuild_native, native_source_stale
+            git_summary, language_targets, rebuild_native, native_source_stale,
+            list_user_tests, save_user_tests, import_user_tests, export_user_tests
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start PlusMinus Studio 5");

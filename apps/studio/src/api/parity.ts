@@ -62,7 +62,17 @@ export interface ExternalDocument { path: string; source: string; digest: string
 export interface SourceTarget { keyword: string; path: string; anchor: string; line: number; label: string }
 export interface GitSummary { available: boolean; branch: string; sha: string; dirty: boolean; changes: string; diff: string; commits: string; error: string }
 
+export interface UserCase {
+  name:string;source:string;kind:"output"|"result"|"bytecode_contains"|"error_contains";
+  expected:string;mode:"run"|"compile"|"profile"|"trace";
+  expect_ok:boolean;timeout:number;
+}
+export interface UserBundle {cases:UserCase[];revision:string}
 export const parity = {
+  userTests:()=>invoke<UserBundle>("list_user_tests"),
+  saveUserTests:(cases:UserCase[],expected:string)=>invoke<UserBundle>("save_user_tests",{cases,expected}),
+  importUserTests:(expected:string)=>invoke<UserBundle>("import_user_tests",{expected}),
+  exportUserTests:()=>invoke<string>("export_user_tests"),
   listNative: () => invoke<NativeCase[]>("list_native_tests"),
   runSuite: async (jobId: string, testIds: string[], label: string, onProgress: (event: NativeEvent) => void) => {
     const onEvent = new Channel<NativeEvent>();
