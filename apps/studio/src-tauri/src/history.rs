@@ -409,11 +409,15 @@ pub fn compare(base_id:i64,current_id:i64)->Result<Value,String>{
     };
     let bmeta=get_meta(base_id)?;
     let cmeta=get_meta(current_id)?;
+    let before_hash=bmeta["source_hash"].as_str().unwrap_or("");
+    let after_hash=cmeta["source_hash"].as_str().unwrap_or("");
+    let source_comparable=!before_hash.is_empty() && before_hash!="unavailable" &&
+        before_hash==after_hash;
     Ok(json!({"introduced":introduced,"fixed":fixed,"remaining_failures":remaining,
       "added":added,"missing":missing,"performance":timings,"baseline":bmeta,
       "current":cmeta,"comparable_platform":platform_tag(bmeta["platform"].as_str().unwrap_or(""))==
           platform_tag(cmeta["platform"].as_str().unwrap_or("")),
-      "same_source":bmeta["source_hash"]==cmeta["source_hash"]}))
+      "same_source":source_comparable}))
 }
 
 #[cfg(test)]
