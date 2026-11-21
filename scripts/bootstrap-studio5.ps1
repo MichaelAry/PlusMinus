@@ -33,9 +33,9 @@ function Install-Winget([string]$id, [string[]]$extra = @()) {
     Die 'winget is unavailable. Install App Installer from Microsoft, then relaunch.'
   }
   Log "Installing missing dependency $id (Windows may request administrator approval)."
-  $args = @('install', '--id', $id, '--exact', '--source', 'winget',
+  $wingetArguments = @('install', '--id', $id, '--exact', '--source', 'winget',
     '--accept-source-agreements', '--accept-package-agreements') + $extra
-  Native 'winget.exe' $args
+  Native 'winget.exe' $wingetArguments
   Refresh-Path
 }
 
@@ -90,8 +90,11 @@ function Test-WebView2 {
   foreach ($base in $registry) {
     $key = Join-Path $base $guid
     if (Test-Path $key) {
-      $version = (Get-ItemProperty $key -ErrorAction SilentlyContinue).pv
-      if ($version -and $version -ne '0.0.0.0') { return $true }
+      $info = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+      if ($info -and $info.PSObject.Properties.Match('pv').Count -gt 0) {
+        $version = $info.pv
+        if ($version -and $version -ne '0.0.0.0') { return $true }
+      }
     }
   }
   $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
