@@ -1,10 +1,12 @@
-# PlusMinus Studio 2.0
+# PlusMinus Studio 3.0
 
-**A native desktop analytics IDE for the PlusMinus C++20 interpreter.**
+**A cross-platform desktop IDE and C++ interpreter test laboratory for PlusMinus (C++20).**
 
-PlusMinus Studio has a Qt/PySide6 dark GUI, a code editor, live resource monitoring,
-startup regression tests, benchmark lab, bytecode analysis, a persistent run history,
-and portable binary packaging for Windows, Linux and macOS.
+PlusMinus Studio 3.0 uses Qt/PySide6 with a tabbed, multi-document workspace,
+a split editor, PlusMinus/C++ highlighting, source-positioned diagnostics,
+automatic startup checks, portable native C++ test discovery and execution,
+SQLite regression baselines, VM profiling and bounded trace replay.
+Windows, Linux and macOS packages are built in GitHub Actions.
 
 ## Start with a double-click
 
@@ -23,7 +25,7 @@ Linux file managers may require **Allow Launching / Mark as Trusted** once. On m
 unsigned command files may need a permission adjustment.
 
 For **installation-free startup**, download a platform-native binary from the
-[GitHub Releases](https://github.com/Maksim23060/PlusMinus/releases) page *once a
+[GitHub Releases](https://github.com/MichaelAry/PlusMinus/releases) page *once a
 successful tagged build has been published*:
 
 - Windows: extract and double-click `PlusMinusStudio.exe`.
@@ -33,23 +35,51 @@ successful tagged build has been published*:
 The executable bundles Python, Qt, psutil and the C++ runner. macOS unsigned binaries
 may require approval in Privacy & Security. Linux bundles depend on a compatible glibc.
 
-## Features
+## Studio 3.0 features
 
-| Area | Features |
+| Area | Implemented |
 |---|---|
-| Overview | Test health, execution and memory cards, performance history |
-| Code Editor | Syntax highlighting, line numbers, open/save, code insights, compiler output, bytecode, variables |
-| Test Center | Automatic startup suite, separate process per test, expected vs actual, import/export user tests |
-| Profiler | Real wall/CPU time, sampled RSS and thread counts, C++ VM phase timing, compiled opcode frequencies |
-| Resources | Live GUI CPU/RSS graph and per-program memory trend |
-| Benchmarks | Repeated runs, warmup, mean, median, P95, standard deviation, graphical comparisons |
-| History | SQLite records (in `~/.plusminus/studio.db`), CSV and JSON export |
+| Workspace | Closable/reorderable section tabs, multiple open files, two-pane split editor, session restoration |
+| Editor | PlusMinus and C++ highlighting, completion, comment toggle, symbol outline, Ctrl+click to editable language internals |
+| Problems | Bracket and concurrency heuristics, compiler errors with source coordinates, inline highlights and Problems pane |
+| Test Center | Fast startup suite, custom JSON suites, and **225 discoverable native C++ test methods** |
+| Native C++ Lab | Quick/full/selected/filtered/failure-only runs, separate process for each case, cancellation and live status |
+| Regression History | SQLite result sessions with Git commit, dirty state, source hash, per-test timing, saved baseline and diff |
+| Profiler / Trace | Runtime opcode hit counts and capped trace replay (5,000 events), separate from compiled opcode counts |
+| Analysis | Bytecode control flow graph, heuristic source call graph, resource measurements, Git status |
+| Benchmarks | Warmup, repeated execution, median, mean, P95, standard deviation |
+| Reports | Execution and test history; JSON/CSV export of general run history |
 
-**Measurement honesty:** Source complexity is a lexical *estimate*, not a full AST or
-control-flow proof. Compiled opcode counts are *static* counts, not execution frequency.
-CPU and memory are sampled; very short processes may escape reliable sampling, and
-sampled peak RSS is not an absolute guaranteed maximum. VM internal timings are only
-present after rebuilding the C++ runner with the metric protocol.
+### Running the native C++ tests
+
+The source launcher builds `plusminus_native_tests` alongside `plusminus_runner`.
+Open **Test Center → Native C++ test suite**. **Run quick** excludes the slow
+stress/benchmark cases; **Run all 225** runs every discovered method and may take
+significantly longer. Use **Run filtered**, **Run failed**, or select an individual
+method. Test results are stored in `~/.plusminus/studio.db`; select **Set baseline**
+and **Compare baseline** after making C++ changes.
+
+You can also use:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+./build/plusminus_native_tests --list
+./build/plusminus_native_tests --suite full
+```
+
+On Windows, use `build/Release/plusminus_native_tests.exe` with multi-config generators.
+The full suite includes stress tests and is not automatically executed at startup.
+The portable `tests/portable/CppUnitTest.h` adapter preserves the existing 225 test
+methods; it is **not** a general replacement for Microsoft's test framework.
+
+**Measurement limits:** Static source diagnostics and call graphs are heuristic,
+not comprehensive AST/type proofs. CPU/RSS are sampled; short-lived spikes can be
+missed. A single test timing is not a statistically reliable performance benchmark.
+Trace replay records up to 5,000 executed instructions; it is **not** a live,
+pausable breakpoint debugger. Programs run in isolated child processes with
+timeouts, not in a complete OS security sandbox.
 
 ## Command-line operations
 
