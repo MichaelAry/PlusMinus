@@ -71,7 +71,8 @@ impl TaskRegistry {
     pub fn complete(&self, job_id: &str, session_id: Option<i64>, canceled: bool, error: Option<String>) {
         if let Ok(mut entries) = self.inner.lock() {
             if let Some(record) = entries.get_mut(job_id) {
-                record.snapshot.status = if canceled {"canceled"} else if error.is_some() {"error"} else {"completed"}.into();
+                let status = if canceled {"canceled"} else if error.is_some() {"error"} else {"completed"};
+                record.snapshot.status = status.to_string();
                 record.snapshot.session_id = session_id;
                 record.snapshot.error = error;
             }
