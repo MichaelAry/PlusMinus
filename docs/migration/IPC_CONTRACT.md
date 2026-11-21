@@ -23,7 +23,7 @@ Empty stdout must be explicitly displayed as empty, not mistaken for zero.
 engine_status() -> string | error
 native_test_status() -> string | error
 run_source({ request:{job_id,source,mode,timeout_ms} })
-  -> {job_id,report,exit_code,wall_ms} | transport error
+  -> {job_id,report,exit_code,wall_ms,stderr,history_error} | transport error
 cancel_run({jobId}) -> boolean
 choose_workspace() -> absolute user-selected folder display name
 list_workspace() -> [{path,name,directory,depth}]
