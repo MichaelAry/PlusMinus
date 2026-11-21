@@ -231,6 +231,35 @@ pub async fn start_native_suite(app:AppHandle,state:State<'_,StudioState>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn cancellation_before_spawn_never_starts_native_process(){
+      let token=CancellationToken::new();token.cancel();
+      let case=NativeCase{id:"Never.Spawn".into(),group:"Never".into(),
+        source:"never.cpp".into(),slow:false};
+      let result=run_single(std::path::Path::new("binary-that-does-not-exist"),
+        case,20,token).await;
+      assert_eq!(result.status,"CANCELED");
+    }
+    #[tokio::test]
+    async fn staged_real_native_test_process_round_trip(){
+      let folder=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+      let binary=std::fs::read_dir(folder).ok().and_then(|entries|
+        entries.filter_map(Result::ok).map(|entry|entry.path()).find(|p|{
+          let file=p.file_name().and_then(|n|n.to_str()).unwrap_or("");
+          file.starts_with("plusminus_native_tests-")&&
+          file.ends_with(std::env::consts::EXE_SUFFIX)
+        }));
+      let Some(path)=binary else{return;}; // cargo test before CMake staging
+      let listing=Command::new(&path).arg("--list").output().await.unwrap();
+      assert!(listing.status.success());
+      let row=listing.stdout.split(|b|*b==b'\n')
+        .filter(|bytes|!bytes.is_empty())
+        .filter_map(|bytes|serde_json::from_slice::<NativeCase>(bytes).ok())
+        .find(|row|!row.slow).expect("No quick test in native manifest");
+      let result=run_single(&path,row,20,CancellationToken::new()).await;
+      assert_eq!(result.status,"PASS","{}",result.error);
+      assert!(result.test_ms.is_some());
+    }
     #[test] fn record_is_explicitly_unmeasured(){
       let case=NativeCase{id:"X.Y".into(),group:"X".into(),source:"test.cpp".into(),slow:false};
       let r=failed(&case,"TIMEOUT","Timed out".into(),30.0);
