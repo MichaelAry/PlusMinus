@@ -177,6 +177,11 @@ class ResearchController:
         self.host.statusBar().showMessage("Default Research Workbench layout restored", 4000)
 
     def restore_layout(self):
+        if getattr(self.host, "safe_mode", False):
+            # Avoid Qt restoring incompatible QDockWidget geometry from a
+            # different monitor, DPI or earlier Studio release.
+            self.explorer.show()
+            return
         state = self.host.settings.value("research_docks_v4")
         if state:
             self.host.restoreState(state, 4)
@@ -320,6 +325,12 @@ def build_research_shell(host, root):
 
     sidebar = QTabWidget()
     explorer_model = QFileSystemModel(sidebar)
+    if getattr(host, "safe_mode", False):
+        # Windows shell icon providers and filesystem watchers can load
+        # third-party native handlers. Exclude them in diagnostic mode.
+        explorer_model.setOptions(
+            QFileSystemModel.Option.DontWatchForChanges |
+            QFileSystemModel.Option.DontUseCustomDirectoryIcons)
     explorer_model.setRootPath(str(root))
     explorer_tree = QTreeView()
     explorer_tree.setModel(explorer_model)
