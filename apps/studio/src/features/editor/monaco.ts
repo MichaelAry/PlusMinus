@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor";
+import { completionCandidates } from "../../model/completion";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 
 (globalThis as typeof globalThis & {
@@ -8,6 +9,28 @@ import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 };
 
 monaco.languages.register({ id: "plusminus", extensions: [".pm"] });
+monaco.languages.setLanguageConfiguration("plusminus", {
+  comments: { lineComment: "//", blockComment: ["/*", "*/"] },
+  brackets: [["{", "}"], ["[", "]"], ["(", ")"]],
+  autoClosingPairs: [
+    {open:"{",close:"}"}, {open:"[",close:"]"}, {open:"(",close:")"},
+    {open:'"',close:'"'}
+  ]
+});
+// Monaco's standard Find, Format and Toggle Line Comment commands now use
+// the registered PlusMinus language configuration, without a custom editor.
+monaco.languages.registerCompletionItemProvider("plusminus", {
+  provideCompletionItems(model, position) {
+    const word=model.getWordUntilPosition(position);
+    const range={
+      startLineNumber:position.lineNumber,endLineNumber:position.lineNumber,
+      startColumn:word.startColumn,endColumn:word.endColumn,
+    };
+    return {suggestions:completionCandidates(model.getValue(),word.word).map(label=>({
+      label,kind:monaco.languages.CompletionItemKind.Keyword,insertText:label,range,
+    }))};
+  },
+});
 monaco.languages.setMonarchTokensProvider("plusminus", {
   tokenizer: {
     root: [
