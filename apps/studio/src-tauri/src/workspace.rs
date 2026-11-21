@@ -80,13 +80,35 @@ pub fn save(root: &Path, relative: &str, source: &str, expected: &str) -> Result
     if digest(&old) != expected { return Err("File changed on disk. Reopen before saving.".into()); }
     let parent = path.parent().ok_or("Missing parent")?;
     // Use a sibling file and atomic rename in the same filesystem.
-    let temporary = parent.join(format!(".pm-save-{}-{}", std::process::id(), std::thread::current().name().unwrap_or("tmp")));
+    // Windows cannot rename a new file over an existing destination. Keep the
+    // previous bytes recoverable until the replacement is in place.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let temporary = parent.join(format!(".pm-save-{}-{nonce}", std::process::id()));
+    let old_permissions = fs::metadata(&path).map_err(|e|e.to_string())?.permissions();
+    if old_permissions.readonly() { return Err("Source file is read-only".into()); }
     let result = (|| -> Result<(), String> {
         use std::io::Write;
         let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)
             .map_err(|e| e.to_string())?;
         file.write_all(source.as_bytes()).map_err(|e| e.to_string())?;
+        file.set_permissions(old_permissions).map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        #[cfg(windows)]
+        {
+            let backup = parent.join(format!(".pm-backup-{}-{nonce}",std::process::id()));
+            fs::rename(&path,&backup).map_err(|e|e.to_string())?;
+            if let Err(error) = fs::rename(&temporary,&path) {
+                let restore = fs::rename(&backup,&path);
+                return Err(match restore {
+                    Ok(()) => error.to_string(),
+                    Err(recovery) => format!("Save failed: {error}; original retained at {} (restore: {recovery})",backup.display()),
+                });
+            }
+            let _ = fs::remove_file(&backup);
+        }
+        #[cfg(not(windows))]
         fs::rename(&temporary, &path).map_err(|e| e.to_string())?;
         Ok(())
     })();
@@ -105,6 +127,21 @@ pub fn create(root: &Path, relative: &str) -> Result<Document, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pm_write_round_trip_preserves_content_and_detects_conflicts() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("studio5-pm-{}-{nonce}",std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let first = create(&root,"program.pm").unwrap();
+        assert_eq!(first.source,"");
+        let next = save(&root,"program.pm","print(0);\n",&first.digest).unwrap();
+        assert_eq!(read(&root,"program.pm").unwrap().source,"print(0);\n");
+        assert!(save(&root,"program.pm","corrupted","incorrect-digest").is_err());
+        assert_eq!(read(&root,"program.pm").unwrap().digest,next.digest);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn rejects_absolute_traversal_and_non_pm() {
         let root = Path::new("/workspace");

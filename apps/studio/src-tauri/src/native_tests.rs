@@ -138,6 +138,7 @@ pub async fn run_suite(app:AppHandle,job_id:String,cases:Vec<NativeCase>,
             }
         }
     }
+    canceled |= token.is_cancelled();
     let passed=results.iter().filter(|r|r.status=="PASS").count();
     let failed=results.len()-passed;
     let storage_results=results.clone();
