@@ -19,31 +19,58 @@ pub(crate) struct StudioState {
     pub(crate) tasks: tasks::TaskRegistry,
     pub(crate) root: Mutex<Option<PathBuf>>,
     pub(crate) source_stale: AtomicBool,
+    pub(crate) built_source_hash: Mutex<Option<String>>,
     pub(crate) rebuilt_native: Mutex<Option<PathBuf>>,
     resources: Mutex<resources::Sampler>,
+}
+
+/// Reject binaries whose C++ inputs differ from the hash captured when they
+/// were built (including external editor changes, CMake and runner.cpp).
+pub(crate) fn ensure_native_fresh(state:&StudioState)->Result<(),String>{
+    if state.source_stale.load(Ordering::SeqCst){
+        return Err("C++ sources changed; rebuild the native engine before running".into());
+    }
+    let root=state.root.lock().map_err(|e|e.to_string())?.clone();
+    let expected=state.built_source_hash.lock().map_err(|e|e.to_string())?.clone();
+    if let Some(root)=root {
+        if language::checkout(&root){
+            let actual=language::build_fingerprint(&root)?;
+            if expected.as_deref()!=Some(actual.as_str()){
+                state.source_stale.store(true,Ordering::SeqCst);
+                return Err("C++ source/build fingerprint mismatch; rebuild native binaries".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
 async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: process::RunRequest)
     -> Result<process::RunResponse, String> {
     process::validate_request(&request)?;
-    if state.source_stale.load(Ordering::SeqCst){return Err("C++ source modified; rebuild the native engine before running".into());}
+    ensure_native_fresh(&state)?;
     let token = state.tasks.register(&request.job_id,"source",1)?;
     let id = request.job_id.clone();
     let category = format!("{:?}",request.mode);
     let source = request.source.clone();
-    let result = process::execute(&app, request, token.clone()).await;
+    let mut result = process::execute(&app, request, token.clone()).await;
     let was_canceled = token.is_cancelled();
-    if let Ok(ref report)=result {
+    if let Ok(ref mut report)=result {
         let ok=report.report["ok"].as_bool().unwrap_or(false);
         let ms=report.wall_ms;
         let details=report.report.clone();
-        let _=tauri::async_runtime::spawn_blocking(move ||
+        let persisted=tauri::async_runtime::spawn_blocking(move ||
             history::save_run(&category,"Source execution",&source,ok,ms,&details)
         ).await;
+        report.history_error=match persisted {
+            Ok(Ok(_))=>None,
+            Ok(Err(e))=>Some(e),
+            Err(e)=>Some(format!("History persistence task failed: {e}")),
+        };
     }
     let passed = result.as_ref().ok().and_then(|r|r.report["ok"].as_bool()).unwrap_or(false);
-    state.tasks.advance(&id, passed)?;
+    // A canceled invocation did not finish a test; never count it as FAIL.
+    if !was_canceled { state.tasks.advance(&id, passed)?; }
     state.tasks.complete(&id,None,was_canceled,result.as_ref().err().cloned());
     result
 }
@@ -55,17 +82,25 @@ fn cancel_run(state: State<'_, StudioState>, job_id: String) -> Result<bool, Str
 
 #[tauri::command]
 async fn choose_workspace(app: AppHandle, state: State<'_, StudioState>) -> Result<String, String> {
+    let dialog_app=app.clone();
     let folder = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog().file().blocking_pick_folder()
+        dialog_app.dialog().file().blocking_pick_folder()
     }).await.map_err(|e| e.to_string())?
       .ok_or("Folder selection canceled")?
       .into_path().map_err(|e| e.to_string())?
       .canonicalize().map_err(|e| e.to_string())?;
     if !folder.is_dir() { return Err("Workspace is not a directory".into()); }
     let display = folder.to_string_lossy().into_owned();
+    // A checked-out C++ project must match the staged sidecar manifest,
+    // not merely match an arbitrary hash recorded at folder selection.
+    let checkout=language::checkout(&folder);
+    let expected=if checkout{language::packaged_fingerprint(&app).ok()}else{None};
+    let actual=if checkout{Some(language::build_fingerprint(&folder)?)}else{None};
+    let stale=checkout && expected.as_deref()!=actual.as_deref();
     *state.root.lock().map_err(|e| e.to_string())? = Some(folder);
     *state.rebuilt_native.lock().map_err(|e|e.to_string())? = None;
-    state.source_stale.store(false,Ordering::SeqCst);
+    *state.built_source_hash.lock().map_err(|e|e.to_string())? = expected;
+    state.source_stale.store(stale,Ordering::SeqCst);
     Ok(display)
 }
 
@@ -182,6 +217,9 @@ async fn language_targets(state:State<'_,StudioState>,keyword:String)
 #[tauri::command]
 async fn rebuild_native(app:AppHandle,state:State<'_,StudioState>)->Result<String,String>{
     let root=workspace_root(&state)?;
+    if !language::checkout(&root){return Err("Choose the PlusMinus C++ source checkout".into());}
+    let before=language::build_fingerprint(&root)?;
+    state.source_stale.store(true,Ordering::SeqCst);
     let log=language::rebuild(&root).await?;
     let build=root.join("build/studio5");
     let ext=std::env::consts::EXE_SUFFIX;
@@ -197,13 +235,17 @@ async fn rebuild_native(app:AppHandle,state:State<'_,StudioState>)->Result<Strin
     };
     let canonical=folder.canonicalize().map_err(|e|e.to_string())?;
     if !canonical.starts_with(&root){return Err("Unexpected build output location".into());}
+    let after=language::build_fingerprint(&root)?;
+    if before!=after{return Err("C++ inputs changed during rebuild; repeat CMake rebuild".into());}
     *state.rebuilt_native.lock().map_err(|e|e.to_string())?=Some(canonical);
+    *state.built_source_hash.lock().map_err(|e|e.to_string())?=Some(after);
     state.source_stale.store(false,Ordering::SeqCst);
     let _=app;
     Ok(log)
 }
 #[tauri::command]
 fn native_source_stale(state:State<'_,StudioState>)->bool{
+    let _=ensure_native_fresh(&state);
     state.source_stale.load(Ordering::SeqCst)
 }
 

@@ -2,10 +2,14 @@ name: Studio 5 Tauri foundation (experimental)
 
 on:
   push:
-    branches: ['feature/studio5-*']
+    branches: ['master']
     paths:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
+      - 'scripts/verify-native-isolation.mjs'
+      - 'scripts/smoke-packaged-linux.sh'
+      - 'scripts/check-qt-native-parity.py'
+      - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
       - 'src/**'
       - 'include/**'
@@ -16,6 +20,10 @@ on:
     paths:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
+      - 'scripts/verify-native-isolation.mjs'
+      - 'scripts/smoke-packaged-linux.sh'
+      - 'scripts/check-qt-native-parity.py'
+      - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
       - 'src/**'
       - 'include/**'
@@ -55,8 +63,8 @@ jobs:
       - name: Verify C++ core and Qt files remain unchanged
         shell: bash
         run: |
-          git fetch --no-tags origin master --depth=1
-          git diff --exit-code origin/master HEAD -- \
+          git fetch --no-tags origin 41360ed7f470dd76da264b24ff74171ef55da5c2 --depth=1
+          git diff --exit-code 41360ed7f470dd76da264b24ff74171ef55da5c2 HEAD -- \
             src/ include/ ide/ tests/cpp/ tests/portable/ \
             CMakeLists.txt launch.py .github/workflows/desktop.yml
 
@@ -89,6 +97,9 @@ jobs:
       - name: Native C++ smoke and quick suite
         run: ctest --test-dir build/studio5 -C Release --output-on-failure
 
+      - name: Verify all 225 C++ tests in independent processes
+        run: node scripts/verify-native-isolation.mjs --build-dir build/studio5
+
       - name: Stage sidecars for Tauri
         run: node scripts/stage-native.mjs --build-dir build/studio5 --target ${{ matrix.triple }}
 
@@ -111,15 +122,54 @@ jobs:
         run: |
           npm run test
           npm run typecheck
+          npm run lint:types
           npm run build:ui
 
-      - name: Rust unit tests
+      - name: Rust typecheck, unit tests and Clippy
         working-directory: apps/studio/src-tauri
-        run: cargo test
+        shell: bash
+        run: |
+          cargo check --all-targets
+          cargo test
+          cargo clippy --all-targets
 
-      - name: Tauri package
+      - name: Tauri package (Windows and Linux)
+        if: runner.os != 'macOS'
         working-directory: apps/studio
         run: npm run tauri build
+
+      - name: Tauri package (macOS with bounded DMG eject retry)
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: apps/studio
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            log="$RUNNER_TEMP/tauri-package-${attempt}.log"
+            echo "macOS Tauri package attempt ${attempt}/3"
+            if npm run tauri build 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            # macOS CI sometimes refuses to eject the temporary RW dmg
+            # (hdiutil: Resource busy), after the application has compiled.
+            # Retry only that known transient packaging error; do not mask
+            # Rust/compiler, configuration or missing-sidecar failures.
+            if ! grep -qiE "(hdiutil:.*Resource busy|couldn't eject.*Resource busy)" "$log"; then
+              echo "Non-transient Tauri packaging failure" >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "macOS DMG eject remained busy after three attempts" >&2
+              exit 1
+            fi
+            hdiutil info || true
+            sync
+            sleep $((15 * attempt))
+          done
+
+      - name: Smoke installed-layout Linux sidecars and GUI startup
+        if: runner.os == 'Linux'
+        run: bash scripts/smoke-packaged-linux.sh
 
       - name: Verify package output
         shell: bash

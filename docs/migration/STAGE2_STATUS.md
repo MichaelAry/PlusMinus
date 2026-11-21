@@ -1,6 +1,7 @@
 # PlusMinus Studio 5 — Stage 2 evidence ledger
 
-**Branch:** `feature/studio5-parity` (Draft [PR #20](https://github.com/MichaelAry/PlusMinus/pull/20)).
+**Stage 2 merged:** [PR #20](https://github.com/MichaelAry/PlusMinus/pull/20) at master 5ebab283.
+**Pre-cutover hardening:** [PR #21](https://github.com/MichaelAry/PlusMinus/pull/21) (CI verification pending).
 **Source baseline:** stage-1 merged commit `c395dfe8` on `master`.
 **Acceptance policy:** DONE requires verified functionality, not merely a class, button or PR description.
 PARTIAL means implemented in part or missing comparable runtime evidence. BLOCKED
@@ -39,7 +40,7 @@ QSettings exporter only reads original preferences.
 | .pm open/create/save and optimistic conflict | PARTIAL | `workspace.rs` test `pm_write_round_trip_preserves_content_and_detects_conflicts`; Windows replace backup | Cross-OS Rust tests and installed file-dialog smoke |
 | 225 native C++ test discovery | PARTIAL | `native_tests.rs::discover`, `scripts/smoke-native.mjs` | Confirm on latest CI and packaged app |
 | Per-test independent OS process, quick/full/filtered/failed | PARTIAL | `native_tests.rs`, `TestLab.tsx`; smoke runs 3 separate tests | Actual suite status/exit parity, resource exhaustion and all 225 |
-| Two-worker concurrency, timeout and cancellation | PARTIAL | Tokio `JoinSet`, `kill_on_drop`, `CancellationToken` | Targeted cancellation, timeout, crash and orphan-process tests |
+| Global native worker limit, timeout, cancellation | PARTIAL | PR #21: shared Semaphore(2), stream-cap reads, cancelable queue | Validate cross-platform CI and process descendants |
 | TaskRegistry, progress and panel reattachment | PARTIAL | `tasks.rs`, `TaskSnapshot`, `list_tasks`, `TestLab.tsx` polling | Task state is process-local, not recovered across application restarts |
 | Test inspector, navigation to C++ sources | PARTIAL | `TestLab.tsx`, `extra_files.rs`, `EditorPane.tsx` anchors | End-to-end anchor navigation in installed GUI |
 | SQLite copy without modifying Studio 4 DB | PARTIAL | `history.rs::initialize_at`, SQLite Backup API, read-only source; disk fixture `real_disk_studio4_migration_is_lossless_and_read_only` | Test on real existing nonempty Studio 4 database; backup failure cases |
@@ -47,7 +48,7 @@ QSettings exporter only reads original preferences.
 | Complete CSV/JSON export of program history | PARTIAL | `history.rs::export_runs_to`, `HistoryPanel.tsx` and Rust serialization test | UI save-dialog smoke and large dataset checks remain |
 | User-defined test JSON import/export | PARTIAL | `user_tests.rs`, `SourceTestsPanel.tsx` | Actual Qt user_tests.json fixture and UI smoke |
 | Portable Qt QSettings export | PARTIAL | `scripts/export-studio4-settings.py` (read only) | Execute with PySide6; Dockview layout not translatable byte-for-byte |
-| Notebook v4 editable code/Markdown, per-cell execution | PARTIAL | `extra_files.rs`, `NotebookPanel.tsx`, `model/notebook.ts` | Tests of full UI round-trip and keyboard shortcuts |
+| Notebook v4 editable code/Markdown, per-cell execution | PARTIAL | PR #21: legacy cell identity normalization, unsaved pane draft recovery and Ctrl+S routing | Installed GUI save/reopen/shortcuts need verification |
 | Notebook metadata retention and conflict detection | PARTIAL | `extra_files.rs` fixture `notebook_round_trip_conflict_and_metadata_preservation` | Real .ipynb fixtures across OS; foreign cells unsupported like Qt |
 | Notebook Run all, stale outputs, append blank cell | PARTIAL | `NotebookPanel.tsx`; verified by code review | UI test for ordering, error termination and concurrent cell edit |
 | Source lexical analysis, diagnostics markers | PARTIAL | `sourceMetrics.ts`, `sourceDiagnostics.ts` + Vitest | Compare markers and exact metrics with Qt reference corpus |
@@ -56,7 +57,7 @@ QSettings exporter only reads original preferences.
 | Profiler and repeated benchmark chart | PARTIAL | `ProfilerPanel.tsx`, `benchmarkStats` Vitest, ECharts | Same-source/same-binary Qt comparisons, full OS process metrics |
 | Rust process CPU/RSS graph | PARTIAL | `resources.rs`, `ResourcePanel.tsx`, sysinfo | Does not include WebView or native test/VM child processes |
 | Git read-only status/commits/diff | PARTIAL | `git_view.rs`, `GitPanel.tsx` | Git navigation and detailed file diffs not at full Qt parity |
-| Language source navigation and CMake rebuild | PARTIAL | `language.rs`, `LanguagePanel.tsx`; stale binary guard | Verify C++ edits / failed rebuild on actual checkout across OS |
+| Language source navigation and CMake rebuild | PARTIAL | PR #21: build-source fingerprint manifest, pre-run check and pre/post rebuild digest | Actual checkout edit/rebuild on all OS pending |
 | Command palette, persisted Dockview panels | PARTIAL | `App.tsx` | Keyboard, session, schema restoration and DPI smoke |
 | Genuine VM breakpoints, pause, stepping | BLOCKED | One-shot original runner exposes no live VM control | Requires separate future C++ debugger interface |
 | Shared-state persistent notebook kernel | BLOCKED | Original runner starts new VM per call | Requires separate future C++ kernel |
@@ -68,12 +69,16 @@ QSettings exporter only reads original preferences.
 - [ ] Latest HEAD: existing Qt CI green on **Windows/Linux/macOS**
 - [x] Protected C++ and original Qt/CMake files unchanged in branch comparison (recheck after every commit)
 - [ ] Actual installed GUI exercises run/compile/profile/trace with original native sidecar
-- [ ] Native test suite all 225: quick/full, cancellation, timeout, kill, per-test errors
+- [ ] PR #21: verify all 225 native cases individually on Windows/Linux/macOS using scripts/verify-native-isolation.mjs
 - [ ] Nonempty real Qt database: source checksum, original counts and baseline equal after migration
 - [ ] .pm/.ipynb round-trip and conflict handling on all supported OS
 - [ ] Differential check `scripts/check-qt-native-parity.py` passes on 3 OS; real UI-vs-Qt comparison still required
 - [ ] GUI performance evidence on real hardware
 
 **Stage 2 is not complete while these acceptance gates are unmet.**
-Do not switch the default launcher, remove Qt, or merge this Draft PR until
-functional parity and cross-platform results are independently established.
+PR #20 has already been merged. Do not switch the default launcher or remove Qt until
+installed GUI parity, full native tests, data safety and performance gates pass.
+
+## Pre-Stage-3 corrections in PR #21
+
+Notebook identity and drafts, global test concurrency, stream caps, Qt platform and time compatibility, strict runner exit statuses, Windows file recovery, C++ source manifests and independent 225-case CI have been implemented in code. These are not DONE until the latest CI is green and applicable installed-GUI and real-data checks pass. See PRE_CUTOVER_VERIFICATION.md.

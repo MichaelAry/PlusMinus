@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Stage unmodified CMake executables for Tauri v2 externalBin.
 import fs from "node:fs";
+import {createHash} from "node:crypto";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -35,3 +36,40 @@ for (const name of ["plusminus_runner", "plusminus_native_tests"]) {
   if (!ext) fs.chmodSync(destination, 0o755);
   console.log("Staged " + path.relative(root, destination));
 }
+
+/** Hash the exact original source set that is built into each sidecar.
+ * The sidecar and manifest are staged together after the CMake build. */
+function buildFingerprint() {
+  const hash = createHash("sha256");
+  const files = [];
+  function visit(dir) {
+    for (const entry of fs.readdirSync(dir, {withFileTypes:true})) {
+      const file = path.join(dir,entry.name);
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile() && /\.(cpp|hpp|h)$/.test(entry.name)) files.push(file);
+    }
+  }
+  for (const folder of ["src","include","tests/cpp","tests/portable"]) {
+    const base=path.join(root,folder);
+    if (fs.existsSync(base)) {
+      files.length=0; visit(base);
+      files.sort();
+      for (const file of files) {
+        hash.update(path.relative(root,file).split(path.sep).join("/"),"utf8");
+        hash.update(fs.readFileSync(file));
+      }
+    }
+  }
+  for (const relative of ["CMakeLists.txt","ide/CMakeLists.txt","ide/runner.cpp",
+    "Parser.h","tools/generate_native_tests.py"]) {
+    const file=path.join(root,relative);
+    if (fs.existsSync(file)) {
+      hash.update(relative,"utf8");
+      hash.update(fs.readFileSync(file));
+    }
+  }
+  return hash.digest("hex");
+}
+const manifest=path.join(staged,"source-fingerprint.json");
+fs.writeFileSync(manifest,JSON.stringify({schema:1,sha256:buildFingerprint()},null,2)+"\n","utf8");
+console.log("Staged source fingerprint for native sidecars");

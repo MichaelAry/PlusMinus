@@ -30,7 +30,8 @@ export function SourceTestsPanel(){
   const [revision,setRevision]=useState("");
   const [selected,setSelected]=useState(0);
   const [running,setRunning]=useState(false);
-  const [outcomes,setOutcomes]=useState<Record<string,{pass:boolean;detail:string;ms:number}>>({});
+  // UI result identity is the case index, not user-editable name (names may collide).
+  const [outcomes,setOutcomes]=useState<Record<number,{pass:boolean;detail:string;ms:number}>>({});
   const [error,setError]=useState("");
   const job=useRef<string|null>(null),cancel=useRef(false);
   const all=[...builtin,...user];
@@ -48,6 +49,7 @@ export function SourceTestsPanel(){
     }catch(e){setError(String(e));}
   };
   useEffect(()=>{void refresh();},[]);
+  useEffect(()=>{setOutcomes({});},[user]);
   const edit=async()=>{
     if(!active){setError("Open a PlusMinus document to define a test");return;}
     const name=window.prompt("New test name","Custom source test");
@@ -80,12 +82,13 @@ export function SourceTestsPanel(){
   };
   const execute=async(allTests:boolean)=>{
     if(running)return;
-    const entries=allTests?all:[all[selected]].filter(Boolean);
+    const entries=allTests?all.map((test,index)=>({test,index})):
+      all[selected]?[{test:all[selected],index:selected}]:[];
     if(!entries.length)return;
     setRunning(true);cancel.current=false;setError("");
-    const next:Record<string,{pass:boolean;detail:string;ms:number}>={...outcomes};
+    const next:Record<number,{pass:boolean;detail:string;ms:number}>={...outcomes};
     try{
-      for(const test of entries){
+      for(const {test,index} of entries){
         if(cancel.current)break;
         const id=freshJobId();job.current=id;
         const start=performance.now();
@@ -97,7 +100,7 @@ export function SourceTestsPanel(){
           actual={ok:false,output:"",result:"",bytecode:"",error:String(e)};
         }
         const verdict=judge(test,actual);
-        next[test.name]= {...verdict,ms:performance.now()-start};
+        next[index]= {...verdict,ms:performance.now()-start};
         setOutcomes({...next});
       }
     }finally{job.current=null;setRunning(false);}
@@ -124,8 +127,8 @@ export function SourceTestsPanel(){
     <div className="lab-two-col"><div className="lab-mini-scroll">
       {all.map((test,i)=><button key={i} className={"session-row "+(selected===i?"selected":"")}
         onClick={()=>setSelected(i)}>
-        <span className={"test-result "+(outcomes[test.name]?.pass===true?"pass":outcomes[test.name]?"fail":"not-run")}>
-          {outcomes[test.name]?(outcomes[test.name].pass?"PASS":"FAIL"):"NOT RUN"}</span>
+        <span className={"test-result "+(outcomes[i]?.pass===true?"pass":outcomes[i]?"fail":"not-run")}>
+          {outcomes[i]?(outcomes[i].pass?"PASS":"FAIL"):"NOT RUN"}</span>
         <span>{test.name}</span><small>{i<builtin.length?"BUILT-IN":"USER"}</small>
       </button>)}
     </div><section>
@@ -133,8 +136,8 @@ export function SourceTestsPanel(){
       <p className="lab-muted">Mode: {all[selected]?.mode} · {all[selected]?.kind}</p>
       <pre className="lab-inspector">{all[selected]?.source}</pre>
       <pre className="lab-inspector">Expected: {JSON.stringify(all[selected]?.expected??"")}</pre>
-      {all[selected]&&outcomes[all[selected].name]&&
-        <pre className="lab-inspector">{outcomes[all[selected].name].detail}</pre>}
+      {all[selected]&&outcomes[selected]&&
+        <pre className="lab-inspector">{outcomes[selected].detail}</pre>}
     </section></div>
     <p className="lab-muted">User definitions copied from the original Studio 4 JSON file into user_tests-v5.json. The original is never overwritten.</p>
   </div>;

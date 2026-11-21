@@ -4,6 +4,7 @@ import { native } from "./api/native";
 import { parity } from "./api/parity";
 import type { RunMode, TreeEntry } from "./api/contracts";
 import { useStudio } from "./model/studio";
+import { hasUnsavedNotebookDrafts, discardWorkspaceNotebooks } from "./model/notebook";
 import { EditorPane } from "./features/editor/EditorPane";
 import { OutputPane } from "./features/output/OutputPane";
 import { TestLab } from "./features/parity/TestLab";
@@ -50,6 +51,7 @@ export default function App() {
   const started=useStudio(s=>s.started),finished=useStudio(s=>s.finished),setMode=useStudio(s=>s.setMode);
   const active=docs.find(d=>d.id===activeId)??docs[0];
   const dockApi=useRef<DockviewReadyEvent["api"]|null>(null);
+  const fileOpenGeneration=useRef(0);
   const [engine,setEngine]=useState("Checking C++ runner…");
   const [message,setMessage]=useState("Graphite Research / Studio 5");
   const [busy,setBusy]=useState(false);
@@ -64,16 +66,24 @@ export default function App() {
     catch(e){setMessage("Workspace: "+String(e));}
   },[setEntries]);
   const chooseWorkspace=useCallback(async()=>{
+    if(useStudio.getState().runningJob){
+      setMessage("Stop the active execution before changing workspaces");return;
+    }
     if(!window.dispatchEvent(new Event("studio:workspace-switch",{cancelable:true})))return;
-    if(useStudio.getState().documents.some(d=>d.dirty)&&
-      !window.confirm("Switch workspace and discard unsaved documents?"))return;
+    if((useStudio.getState().documents.some(d=>d.dirty)||hasUnsavedNotebookDrafts(workspace))&&
+      !window.confirm("Switch workspace and discard unsaved documents/notebooks?"))return;
     try{
       const folder=await native.chooseWorkspace();
-      const tree=await native.listWorkspace();
+      fileOpenGeneration.current++;
+      let tree:TreeEntry[]=[];
+      let treeError="";
+      try { tree=await native.listWorkspace(); }
+      catch(e){treeError=String(e);}
+      if(workspace)discardWorkspaceNotebooks(workspace);
       setWorkspace(folder,tree);
-      setMessage("Workspace selected: "+folder);
+      setMessage(treeError?"Workspace selected; file listing failed: "+treeError:"Workspace selected: "+folder);
     }catch(e){setMessage(String(e));}
-  },[setWorkspace]);
+  },[setWorkspace,workspace]);
   const showPanel=useCallback((name:PanelName)=>{
     const api=dockApi.current;if(!api)return;
     const id=name==="editor"?"source-editor":name==="results"?"run-results":"tool-"+name;
@@ -84,6 +94,8 @@ export default function App() {
       position:reference?{referencePanel:reference,direction:name==="tests"?"right":"below"}:undefined});
   },[]);
   const openFile=useCallback(async(path:string,anchor?:string)=>{
+    const requestId=++fileOpenGeneration.current;
+    const root=useStudio.getState().workspace;
     if(path.endsWith(".ipynb")){
       sessionStorage.setItem("studio5:open-notebook",path);
       showPanel("notebook");
@@ -94,14 +106,22 @@ export default function App() {
     if(existing){useStudio.getState().select(existing.id);}
     else try{
       const doc=path.endsWith(".pm")?await native.openSource(path):await parity.openDocument(path);
+      if(fileOpenGeneration.current!==requestId || useStudio.getState().workspace!==root)return;
       open(doc);setMessage("Opened "+path);
-    }catch(e){setMessage("Open failed: "+String(e));return;}
+    }catch(e){
+      if(fileOpenGeneration.current===requestId && useStudio.getState().workspace===root)
+        setMessage("Open failed: "+String(e));
+      return;
+    }
     showPanel("editor");
     if(anchor)requestAnimationFrame(()=>setTimeout(()=>{
       window.dispatchEvent(new CustomEvent("studio:goto-anchor",{detail:{path,anchor}}));
     },50));
   },[open,showPanel]);
   const saveFile=useCallback(async()=>{
+    if(dockApi.current?.activePanel?.id==="tool-notebook"){
+      window.dispatchEvent(new Event("studio:save-notebook"));return;
+    }
     const state=useStudio.getState(),doc=state.documents.find(d=>d.id===state.activeId);
     if(!doc||busy)return;
     if(!state.workspace){setMessage("Select a workspace before saving");return;}
@@ -132,11 +152,12 @@ export default function App() {
     if(state.runningJob)return;
     const doc=state.documents.find(d=>d.id===state.activeId);
     if(!doc || (doc.path && !doc.path.endsWith(".pm"))){setMessage("Select a PlusMinus .pm document to execute");return;}
-    const job=crypto.randomUUID();started(job);
+    const job=crypto.randomUUID();started(job,doc.id,doc.source);
     try{
       const result=await native.runSource(job,doc.source,override??state.mode,10000);
       finished(job,result,null);
-      setMessage(result.report.ok?"Native execution completed":"PlusMinus error — see Diagnostics");
+      setMessage(result.history_error?"Execution finished, but history could not be saved — see Results":
+        result.report.ok?"Native execution completed":"PlusMinus error — see Diagnostics");
     }catch(e){finished(job,null,String(e));setMessage("Execution failed: "+String(e));}
     showPanel("results");
   },[started,finished,showPanel]);
@@ -158,6 +179,15 @@ export default function App() {
       window.removeEventListener("studio:refresh-workspace",refreshEvent);
     };
   },[openFile,refresh]);
+  useEffect(()=>{
+    const guard=(e:BeforeUnloadEvent)=>{
+      if(hasUnsavedNotebookDrafts()||useStudio.getState().documents.some(d=>d.dirty)){
+        e.preventDefault();e.returnValue="";
+      }
+    };
+    window.addEventListener("beforeunload",guard);
+    return()=>window.removeEventListener("beforeunload",guard);
+  },[]);
   useEffect(()=>{
     function onKey(e:KeyboardEvent){
       if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==="p"){

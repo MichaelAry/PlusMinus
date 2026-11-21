@@ -36,6 +36,10 @@ pub struct RunResponse {
     pub report: Value,
     pub exit_code: Option<i32>,
     pub wall_ms: f64,
+    /// Captured native stderr; not merged into the JSON runner report.
+    pub stderr: String,
+    /// A successful VM execution may still have failed to persist its history.
+    pub history_error: Option<String>,
 }
 
 pub fn validate_request(request: &RunRequest) -> Result<(), String> {
@@ -87,7 +91,7 @@ pub fn resolve_native(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     Err(format!("{name} not found; build C++ and stage native sidecars first"))
 }
 
-async fn read_capped<R: AsyncRead + Unpin>(mut stream: R, max: usize) -> Result<Vec<u8>, String> {
+pub(crate) async fn read_capped<R: AsyncRead + Unpin>(mut stream: R, max: usize) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 8192];
     loop {
@@ -117,10 +121,44 @@ pub fn decode_report(stdout: &[u8], exit_code: Option<i32>) -> Result<Value, Str
        !object.get("metrics").is_some_and(Value::is_object) {
         return Err("Runner response has invalid diagnostics, trace or metrics".into());
     }
+    if !object.get("trace_truncated").is_some_and(Value::is_boolean) {
+        return Err("Runner response missing boolean trace_truncated".into());
+    }
+    let diagnostics = object["diagnostics"].as_array().ok_or("Invalid diagnostics")?;
+    for row in diagnostics {
+        if !row.get("severity").is_some_and(Value::is_string)
+            || !row.get("phase").is_some_and(Value::is_string)
+            || !row.get("message").is_some_and(Value::is_string)
+            || !row.get("line").is_some_and(|v| v.as_u64().is_some())
+            || !row.get("column").is_some_and(|v| v.as_u64().is_some()) {
+            return Err("Malformed runner diagnostic".into());
+        }
+    }
+    let trace = object["trace"].as_array().ok_or("Invalid trace")?;
+    if trace.len() > 5000 { return Err("Runner trace exceeds the 5000 event cap".into()); }
+    for row in trace {
+        if !row.get("ip").is_some_and(|v| v.as_u64().is_some())
+            || !row.get("thread").is_some_and(|v| v.as_u64().is_some())
+            || !row.get("stack_depth").is_some_and(|v| v.as_u64().is_some())
+            || !row.get("opcode").is_some_and(Value::is_string) {
+            return Err("Malformed runner trace event".into());
+        }
+    }
+    let metrics = object["metrics"].as_object().ok_or("Invalid metrics")?;
+    for key in ["compile_ms", "execute_ms", "program_instructions", "executed_instructions"] {
+        if !metrics.get(key).is_some_and(|v| v.is_null() || v.is_number()) {
+            return Err(format!("Malformed runner metric {key}"));
+        }
+    }
+    if !metrics.get("opcode_hits").and_then(Value::as_object)
+        .is_some_and(|hits| hits.values().all(|n| n.as_u64().is_some())) {
+        return Err("Malformed runner opcode_hits".into());
+    }
     // Compile errors return ok=false AND exit 1: preserve the legitimate report.
     // Exit 0 with ok=false or exit nonzero with ok=true is a protocol mismatch.
-    if (exit_code == Some(0)) != (value["ok"] == true) {
-        return Err(format!("Runner response/exit mismatch: {exit_code:?}"));
+    let expected = if value["ok"] == true {Some(0)} else {Some(1)};
+    if exit_code != expected {
+        return Err(format!("Runner response/exit mismatch: expected {expected:?}, got {exit_code:?}"));
     }
     Ok(value)
 }
@@ -132,6 +170,13 @@ pub async fn execute(
 ) -> Result<RunResponse, String> {
     validate_request(&request)?;
     let executable = resolve_native(app, "plusminus_runner")?;
+    execute_with_executable(executable,request,cancel).await
+}
+/// Testable entrypoint preserving the *real* unchanged one-shot C++ process.
+pub(crate) async fn execute_with_executable(
+    executable: PathBuf,request:RunRequest,cancel:CancellationToken
+)->Result<RunResponse,String>{
+    validate_request(&request)?;
     let start = Instant::now();
     let mut child = Command::new(executable)
         .arg(request.mode.argv())
@@ -167,25 +212,78 @@ pub async fn execute(
     }
     let (status, stdout, stderr) = outcome?;
     let report = decode_report(&stdout, status.code())?;
-    if !stderr.is_empty() {
-        // Stderr is preserved as transport information, never silently discarded.
-        let message = String::from_utf8_lossy(&stderr);
-        if report["ok"] == true {
-            return Err(format!("Runner emitted stderr: {message}"));
-        }
-    }
+    // Preserve stderr even for compilation failures, without changing the
+    // authoritative JSON report or incorrectly declaring successful execution a failure.
     Ok(RunResponse {
         job_id: request.job_id,
         report,
         exit_code: status.code(),
         wall_ms: start.elapsed().as_secs_f64() * 1000.0,
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        history_error: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    const EMPTY: &str = r#"{"ok":true,"output":"","result":"0","variables":"","bytecode":"","error":"","diagnostics":[],"trace":[],"metrics":{}}"#;
+    const EMPTY: &str = r#"{"ok":true,"output":"","result":"0","variables":"","bytecode":"","error":"","diagnostics":[],"trace":[],"trace_truncated":false,"metrics":{"compile_ms":0,"execute_ms":null,"program_instructions":0,"executed_instructions":0,"opcode_hits":{}}}"#;
+    fn staged_cpp_runner()->Option<PathBuf>{
+        let folder=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        std::fs::read_dir(folder).ok()?.filter_map(Result::ok)
+            .map(|e|e.path()).find(|p|{
+                let name=p.file_name().and_then(|n|n.to_str()).unwrap_or("");
+                name.starts_with("plusminus_runner-")&&
+                  name.ends_with(std::env::consts::EXE_SUFFIX)
+            })
+    }
+    #[tokio::test]
+    async fn actual_cpp_runner_all_modes_compile_errors_and_zero(){
+        let Some(path)=staged_cpp_runner() else{return;};
+        for mode in [RunMode::Run,RunMode::Compile,RunMode::Profile,RunMode::Trace]{
+            let response=execute_with_executable(path.clone(),RunRequest{
+                job_id:"cpp-smoke-001".into(),source:"print(0);\\n".replace("\\n","\n"),
+                mode,timeout_ms:10000,
+            },CancellationToken::new()).await.unwrap();
+            assert_eq!(response.exit_code,Some(0));
+            assert_eq!(response.report["ok"],true);
+            if matches!(mode,RunMode::Run){assert!(response.report["output"].as_str().unwrap().contains('0'));}
+            if matches!(mode,RunMode::Trace){assert!(response.report["trace"].as_array().unwrap().len()>0);}
+        }
+        let failure=execute_with_executable(path,RunRequest{
+            job_id:"cpp-smoke-err".into(),source:"print(;".into(),
+            mode:RunMode::Compile,timeout_ms:10000,
+        },CancellationToken::new()).await.unwrap();
+        assert_eq!(failure.exit_code,Some(1));
+        assert_eq!(failure.report["ok"],false);
+    }
+    #[tokio::test]
+    async fn actual_cpp_timeout_terminates_one_shot_runner(){
+        let Some(path)=staged_cpp_runner() else{return;};
+        let result=execute_with_executable(path,RunRequest{
+            job_id:"cpp-loop-001".into(),source:"while (1) {}".into(),
+            mode:RunMode::Run,timeout_ms:300,
+        },CancellationToken::new()).await;
+        assert!(result.unwrap_err().contains("timed out"));
+    }
+    #[tokio::test]
+    async fn actual_cpp_cancellation_is_reported_and_child_is_stopped() {
+        let Some(path)=staged_cpp_runner() else{return;};
+        let token=CancellationToken::new();
+        let cancel=token.clone();
+        let running=tokio::spawn(async move {
+            execute_with_executable(path,RunRequest {
+                job_id:"cpp-cancel-001".into(),source:"while (1) {}".into(),
+                mode:RunMode::Run,timeout_ms:10000,
+            },cancel).await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        token.cancel();
+        let outcome=tokio::time::timeout(Duration::from_secs(3),running)
+            .await.expect("Canceled runner did not exit promptly").unwrap();
+        assert!(outcome.unwrap_err().contains("Canceled by user"));
+    }
+
     #[test]
     fn empty_stdout_and_zero_result_are_not_lost() {
         let result = decode_report(EMPTY.as_bytes(), Some(0)).unwrap();
@@ -198,8 +296,39 @@ mod tests {
         assert!(decode_report(data.as_bytes(), Some(1)).is_ok());
     }
     #[test]
+    fn cpp_exit_code_two_is_not_a_language_error(){
+        let failure=EMPTY.replace(r#""ok":true"#,r#""ok":false"#);
+        assert!(decode_report(failure.as_bytes(),Some(2)).is_err());
+    }
+    #[test]
     fn success_exit_mismatch_is_error() {
         assert!(decode_report(EMPTY.as_bytes(), Some(1)).is_err());
+    }
+    #[tokio::test]
+    async fn bounded_stream_read_rejects_excess_bytes_before_eof(){
+        use tokio::io::AsyncWriteExt;
+        let (mut writer,reader)=tokio::io::duplex(64);
+        let send=tokio::spawn(async move{
+            let _=writer.write_all(&vec![b'x';128]).await;
+        });
+        let rejected=read_capped(reader,100).await;
+        assert!(rejected.unwrap_err().contains("exceeds 100 bytes"));
+        send.abort();
+    }
+    #[test]
+    fn rejects_malformed_nested_native_reports() {
+        let mut payload: Value = serde_json::from_str(EMPTY).unwrap();
+        payload["metrics"]["opcode_hits"] = serde_json::json!({"Jmp": "invalid"});
+        assert!(decode_report(payload.to_string().as_bytes(), Some(0)).is_err());
+        payload["metrics"]["opcode_hits"] = serde_json::json!({});
+        payload["trace_truncated"] = Value::Null;
+        assert!(decode_report(payload.to_string().as_bytes(), Some(0)).is_err());
+        payload["trace_truncated"] = serde_json::json!(false);
+        payload["diagnostics"] = serde_json::json!([{"message": "missing fields"}]);
+        assert!(decode_report(payload.to_string().as_bytes(), Some(0)).is_err());
+        payload["diagnostics"] = serde_json::json!([]);
+        payload["trace"] = serde_json::json!([{"ip": "not an index"}]);
+        assert!(decode_report(payload.to_string().as_bytes(), Some(0)).is_err());
     }
     #[test]
     fn rejects_multiple_objects_and_invalid_payload() {

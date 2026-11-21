@@ -127,6 +127,16 @@ mod tests {
         assert!(!registry.cancel("job-one-01234").unwrap());
     }
     #[test]
+    fn cancelled_unfinished_source_is_not_misclassified_as_failed() {
+        let registry=TaskRegistry::default();
+        registry.register("stopped-001","source",1).unwrap();
+        assert!(registry.cancel("stopped-001").unwrap());
+        registry.complete("stopped-001",None,true,Some("Canceled by user".into()));
+        let result=registry.snapshot("stopped-001").unwrap().unwrap();
+        assert_eq!(result.status,"canceled");
+        assert_eq!((result.done,result.failed,result.passed),(0,0,0));
+    }
+    #[test]
     fn registry_rejects_impossible_progress() {
         let registry=TaskRegistry::default();
         registry.register("job-two-01234","source",1).unwrap();

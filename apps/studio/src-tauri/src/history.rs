@@ -4,7 +4,11 @@ use rusqlite::{backup::Backup, params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, io::Write, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{fs, io::Write, path::{Path, PathBuf}, sync::{Mutex,atomic::{AtomicBool,Ordering}}, time::{Duration, SystemTime, UNIX_EPOCH}};
+
+// Guard simultaneous first-use calls from multiple Tauri worker threads.
+static DB_INITIALIZE_LOCK: Mutex<()> = Mutex::new(());
+static USER_DB_READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativeResult {
@@ -47,6 +51,19 @@ fn count_table(db: &Connection, name: &str) -> Result<i64, String> {
     db.query_row(query, [], |r| r.get(0)).map_err(|e| e.to_string())
 }
 
+const STUDIO_SCHEMA_VERSION: i64 = 5;
+
+fn checked_schema_version(db: &Connection) -> Result<i64, String> {
+    let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if version > STUDIO_SCHEMA_VERSION {
+        return Err(format!(
+            "Unsupported future studio-v5.db schema version {version}; expected <= {STUDIO_SCHEMA_VERSION}. Database untouched."
+        ));
+    }
+    Ok(version)
+}
+
 fn verify(db: &Connection) -> Result<(), String> {
     let check: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -55,19 +72,36 @@ fn verify(db: &Connection) -> Result<(), String> {
 }
 
 pub fn initialize() -> Result<PathBuf, String> {
-    initialize_at(path_v5()?)
+    let dest=path_v5()?;
+    // Only migrate/integrity-check on the first successful use of the user DB
+    // in this process. Rechecking the full database for every history query is
+    // expensive on large Qt histories and may stall unrelated Tokio workers.
+    if USER_DB_READY.load(Ordering::Acquire) {
+        if dest.is_file() { return Ok(dest); }
+        return Err("Studio 5 history database disappeared during this session".into());
+    }
+    let result=initialize_at(dest)?;
+    USER_DB_READY.store(true,Ordering::Release);
+    Ok(result)
 }
 
 fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
+    let _guard = DB_INITIALIZE_LOCK.lock().map_err(|_| "Database initialization lock poisoned")?;
     if !dest.exists() {
         let old = dest.with_file_name("studio.db");
-        let temp = dest.with_extension(format!("db.migration-{}.tmp", std::process::id()));
-        if temp.exists() { return Err("An unfinished migration backup exists; inspect it before retrying".into()); }
+        // Unique staging names tolerate previous crashed processes without reusing
+        // potentially corrupt temporary files.
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_default().as_nanos();
+        let temp = dest.with_extension(format!("db.migration-{}-{nonce}.tmp", std::process::id()));
         let source = if old.is_file() {
             Some(Connection::open_with_flags(&old, OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .map_err(|e| e.to_string())?)
         } else { None };
-        if let Some(ref source) = source { verify(source)?; }
+        if let Some(ref source) = source {
+            verify(source)?;
+            checked_schema_version(source)?;
+        }
         let mut new_db = Connection::open(&temp).map_err(|e| e.to_string())?;
         let backup_result = (|| -> Result<(), String> {
             if let Some(ref src) = source {
@@ -82,6 +116,15 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
                     }
                 }
             }
+            // A copied WAL journal mode can otherwise leave committed schema changes
+            // in a temp-WAL sidecar which would NOT follow the published DB path.
+            let mode:String = new_db.query_row("PRAGMA journal_mode=DELETE", [], |r|r.get(0))
+                .map_err(|e| e.to_string())?;
+            if !mode.eq_ignore_ascii_case("delete") {
+                return Err(format!("Cannot switch staging database to rollback journal: {mode}"));
+            }
+            // Complete schema upgrades in staging before publishing studio-v5.db.
+            migrate_schema(&mut new_db)?;
             Ok(())
         })();
         drop(new_db);
@@ -89,12 +132,25 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
             let _ = fs::remove_file(&temp);
             return Err(e);
         }
-        // No existing v5 file is ever overwritten or reset.
-        if dest.exists() { let _ = fs::remove_file(&temp); return Err("v5 database already appeared".into()); }
-        fs::rename(&temp, &dest).map_err(|e| e.to_string())?;
+        // Atomic no-clobber publication: unlike rename on Unix, hard_link never
+        // replaces a concurrently created database from another Studio instance.
+        // Both paths share the filesystem; the staging connection has been closed.
+        match fs::hard_link(&temp, &dest) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => { let _=fs::remove_file(&temp); return Err(format!("Cannot publish v5 database: {e}")); }
+        }
+        let _=fs::remove_file(&temp);
     }
     let mut db = Connection::open(&dest).map_err(|e| e.to_string())?;
+    migrate_schema(&mut db)?;
+    Ok(dest)
+}
+
+/// Idempotent: a failed schema transaction rolls back without partial upgrades.
+fn migrate_schema(db: &mut Connection) -> Result<(), String> {
     db.busy_timeout(Duration::from_secs(12)).map_err(|e| e.to_string())?;
+    checked_schema_version(db)?;
     {
         let tx = db.transaction().map_err(|e| e.to_string())?;
         tx.execute_batch(
@@ -135,18 +191,29 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
         }
         tx.commit().map_err(|e| e.to_string())?;
     }
-    verify(&db)?;
-    Ok(dest)
+    verify(db)?;
+    Ok(())
 }
 
 fn now() -> String {
-    SystemTime::now().duration_since(UNIX_EPOCH)
-        .unwrap_or_default().as_secs().to_string()
+    // Python Studio 4 stores UTC ISO-8601 timestamps. Preserve sortable,
+    // human-readable date strings for all new Studio 5 sessions and runs.
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_|"1970-01-01T00:00:00Z".into())
+}
+fn platform_tag(os: &str) -> &str {
+    // Python sys.platform and Rust std::env::consts::OS use different labels.
+    // Normalize for *comparison* without editing legacy Qt database rows.
+    match os { "windows"|"win32"=>"win32", "macos"|"darwin"=>"darwin", other=>other }
 }
 
 fn connect() -> Result<Connection, String> {
     let path = initialize()?;
-    Connection::open(path).map_err(|e| e.to_string())
+    let db=Connection::open(path).map_err(|e|e.to_string())?;
+    db.busy_timeout(Duration::from_secs(12)).map_err(|e|e.to_string())?;
+    checked_schema_version(&db)?;
+    Ok(db)
 }
 
 pub fn overview() -> Result<Value, String> {
@@ -308,7 +375,7 @@ pub fn save_native_session(label: &str, results: &[NativeResult], root: Option<&
     let tx=db.transaction().map_err(|e| e.to_string())?;
     tx.execute("INSERT INTO native_sessions(timestamp,label,git_sha,source_hash,dirty,platform,total_ms)
                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
-       params![now(),label,sha,hash,i64::from(dirty),std::env::consts::OS,
+       params![now(),label,sha,hash,i64::from(dirty),platform_tag(std::env::consts::OS),
           results.iter().map(|r|r.elapsed_ms).sum::<f64>()])
        .map_err(|e|e.to_string())?;
     let sid=tx.last_insert_rowid();
@@ -401,15 +468,30 @@ pub fn compare(base_id:i64,current_id:i64)->Result<Value,String>{
     };
     let bmeta=get_meta(base_id)?;
     let cmeta=get_meta(current_id)?;
+    let before_hash=bmeta["source_hash"].as_str().unwrap_or("");
+    let after_hash=cmeta["source_hash"].as_str().unwrap_or("");
+    let source_comparable=!before_hash.is_empty() && before_hash!="unavailable" &&
+        before_hash==after_hash;
     Ok(json!({"introduced":introduced,"fixed":fixed,"remaining_failures":remaining,
       "added":added,"missing":missing,"performance":timings,"baseline":bmeta,
-      "current":cmeta,"comparable_platform":bmeta["platform"]==cmeta["platform"],
-      "same_source":bmeta["source_hash"]==cmeta["source_hash"]}))
+      "current":cmeta,"comparable_platform":platform_tag(bmeta["platform"].as_str().unwrap_or(""))==
+          platform_tag(cmeta["platform"].as_str().unwrap_or("")),
+      "same_source":source_comparable}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn qt_and_rust_platform_names_compare_equal(){
+        assert_eq!(platform_tag("windows"),platform_tag("win32"));
+        assert_eq!(platform_tag("macos"),platform_tag("darwin"));
+        assert_ne!(platform_tag("linux"),platform_tag("darwin"));
+    }
+    #[test] fn session_timestamp_uses_utc_iso_8601(){
+        let stamp=now();
+        assert!(stamp.contains('T')&&stamp.ends_with('Z'),"{stamp}");
+        assert!(stamp.starts_with("20"),"{stamp}");
+    }
     #[test] fn history_reports_stream_all_rows_without_losing_json(){
         let db=Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runs (
@@ -482,6 +564,39 @@ mod tests {
         assert_eq!(Sha256::digest(fs::read(&old).unwrap()),old_hash);
         drop(migrated);
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test] fn concurrent_first_use_is_idempotent() {
+        let folder=std::env::temp_dir().join(format!("studio5-init-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&folder).unwrap();
+        let destination=folder.join("studio-v5.db");
+        let handles: Vec<_> = (0..5).map(|_|{
+            let copy=destination.clone();
+            std::thread::spawn(move||initialize_at(copy))
+        }).collect();
+        for h in handles { assert_eq!(h.join().unwrap().unwrap(),destination); }
+        let db=Connection::open(&destination).unwrap();
+        assert_eq!(checked_schema_version(&db).unwrap(),5);
+        verify(&db).unwrap();
+        drop(db);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test] fn rejects_future_schema_without_mutating_existing_v5_data() {
+        let root = std::env::temp_dir().join(format!("studio5-future-schema-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("studio-v5.db");
+        {
+            let db = Connection::open(&dest).unwrap();
+            db.execute_batch("PRAGMA user_version=999; CREATE TABLE future_data(value TEXT);
+                INSERT INTO future_data(value) VALUES('keep me');").unwrap();
+        }
+        let original = fs::read(&dest).unwrap();
+        assert!(initialize_at(dest.clone()).unwrap_err().contains("future"));
+        assert_eq!(fs::read(&dest).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test] fn sqlite_backup_preserves_original_rows(){

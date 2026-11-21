@@ -4,12 +4,13 @@ import { monaco } from "../editor/monaco";
 import { native } from "../../api/native";
 import { parity, freshJobId } from "../../api/parity";
 import { useStudio } from "../../model/studio";
-import { freshNotebook, validateNotebook, encodeNotebook, withCell, makeCell, sourceText, streamOutput, errorOutput,
+import { freshNotebook, validateNotebook, encodeNotebook, withCell, makeCell, sourceText, streamOutput, errorOutput, executeResultOutput, outputText,
+  rememberNotebookDraft, recoverNotebookDraft, latestNotebookDraft, discardNotebookDraft,
   type Notebook, type NotebookCell } from "../../model/notebook";
 
-function CodeCell({source,onChange,onRun,selected}:{source:string;onChange:(v:string)=>void;onRun:(next:boolean)=>void;selected:boolean}){
+function CodeCell({source,onChange,onRun,onSave,selected}:{source:string;onChange:(v:string)=>void;onRun:(next:boolean)=>void;onSave:()=>void;selected:boolean}){
   const host=useRef<HTMLDivElement>(null),editor=useRef<monaco.editor.IStandaloneCodeEditor|null>(null);
-  const callbacks=useRef({onChange,onRun});callbacks.current={onChange,onRun};
+  const callbacks=useRef({onChange,onRun,onSave});callbacks.current={onChange,onRun,onSave};
   useEffect(()=>{
     if(!host.current)return;
     const e=monaco.editor.create(host.current,{
@@ -21,6 +22,8 @@ function CodeCell({source,onChange,onRun,selected}:{source:string;onChange:(v:st
     const subscription=e.onDidChangeModelContent(()=>callbacks.current.onChange(e.getValue()));
     e.addCommand(monaco.KeyMod.Shift|monaco.KeyCode.Enter,()=>callbacks.current.onRun(true));
     e.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.Enter,()=>callbacks.current.onRun(false));
+    // Monaco may consume Ctrl+S before the window-level shortcut receives it.
+    e.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS,()=>callbacks.current.onSave());
     return()=>{subscription.dispose();e.dispose();editor.current=null;};
   },[]);
   useEffect(()=>{
@@ -46,14 +49,31 @@ export function NotebookPanel(){
   const [message,setMessage]=useState("");
   const [visibleCount,setVisibleCount]=useState(40);
   const openRef=useRef<(path:string)=>Promise<void>>(async()=>{});
+  const openGeneration=useRef(0);
+  const saveRef=useRef<()=>Promise<void>>(async()=>{});
   const open=async(p:string)=>{
+    const requestId=++openGeneration.current;
+    const root=workspace;
     if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
+    const discardPrevious=Boolean(dirty&&workspace&&path);
+    const cached=workspace?recoverNotebookDraft(workspace,p):null;
+    if(cached){
+      if(discardPrevious&&workspace)discardNotebookDraft(workspace,path);
+      setPath(p);setNotebook(cached.notebook);current.current=cached.notebook;
+      setDigest(cached.digest);setSelected(cached.selected);setStale(cached.stale);
+      setDirty(true);setError("");setMessage("Recovered unsaved notebook "+p);return;
+    }
     try {
       const doc=await parity.openDocument(p);
+      if(openGeneration.current!==requestId || root!==useStudio.getState().workspace)return;
       const parsed=validateNotebook(JSON.parse(doc.source.replace(/^\uFEFF/,"")));
+      if(discardPrevious&&workspace)discardNotebookDraft(workspace,path);
       setPath(p);setNotebook(parsed);current.current=parsed;
       setDigest(doc.digest);setDirty(false);setStale({});setSelected(0);setError("");setMessage("Opened "+p);
-    }catch(e){setError(String(e));}
+    }catch(e){
+      if(openGeneration.current===requestId && root===useStudio.getState().workspace)
+        setError(String(e));
+    }
   };
   openRef.current=open;
   useEffect(() => {
@@ -70,28 +90,38 @@ export function NotebookPanel(){
     return()=>window.removeEventListener("studio:notebook-open",handler);
   },[workspace]);
   useEffect(() => {
-    setNotebook(null);current.current=null;setPath("");setDigest("");setDirty(false);setStale({});setSelected(0);
+    const recovered=workspace?latestNotebookDraft(workspace):null;
+    if(recovered){
+      const {path:cachedPath,draft}=recovered;
+      setPath(cachedPath);setNotebook(draft.notebook);current.current=draft.notebook;
+      setDigest(draft.digest);setDirty(true);setStale(draft.stale);setSelected(draft.selected);
+    }else{
+      setNotebook(null);current.current=null;setPath("");setDigest("");setDirty(false);setStale({});setSelected(0);
+    }
   },[workspace]);
 
   useEffect(()=>{
     const onSwitch=(event:Event)=>{
       if(activeJob.current){event.preventDefault();setError("Stop notebook execution before changing workspace");return;}
-      if(dirty&&!window.confirm("Discard unsaved notebook changes?"))event.preventDefault();
+      // App-level guard handles dirty drafts even when this Dockview panel is closed.
     };
     window.addEventListener("studio:workspace-switch",onSwitch);
     return()=>window.removeEventListener("studio:workspace-switch",onSwitch);
   },[dirty]);
   const update=(next:Notebook)=>{
     current.current=next;setNotebook(next);setDirty(true);
+    if(workspace && path) rememberNotebookDraft(workspace,path,{notebook:next,digest,selected,stale});
   };
   const create=async()=>{
     if(!workspace){setError("Choose workspace first");return;}
     if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
+    const discardPrevious=Boolean(dirty&&workspace&&path);
     const name=window.prompt("New notebook (.ipynb)", "research.ipynb");
     if(!name)return;
     try{
       const doc=await parity.createNotebook(name,encodeNotebook(freshNotebook()));
       const parsed=validateNotebook(JSON.parse(doc.source));
+      if(discardPrevious)discardNotebookDraft(workspace,path);
       setPath(doc.path);setNotebook(parsed);current.current=parsed;setDigest(doc.digest);
       setDirty(false);setError("");setMessage("Created "+doc.path);
       window.dispatchEvent(new Event("studio:refresh-workspace"));
@@ -103,10 +133,21 @@ export function NotebookPanel(){
     try{
       const result=await parity.saveDocument(path,source,digest);
       setDigest(result.digest);
-      if(sameString(encodeNotebook(current.current??notebook),source))setDirty(false);
+      if(sameString(encodeNotebook(current.current??notebook),source)){
+        setDirty(false);
+        if(workspace)discardNotebookDraft(workspace,path);
+      }else if(workspace){
+        rememberNotebookDraft(workspace,path,{notebook:current.current??notebook,digest:result.digest,selected,stale});
+      }
       setMessage("Saved "+path);setError("");
     }catch(e){setError(String(e));}
   };
+  saveRef.current=save;
+  useEffect(()=>{
+    const handler=()=>void saveRef.current();
+    window.addEventListener("studio:save-notebook",handler);
+    return()=>window.removeEventListener("studio:save-notebook",handler);
+  },[]);
   const replaceSource=(index:number,source:string)=>{
     const n=current.current;if(!n)return;
     const cell=n.cells[index]; if(!cell)return;
@@ -139,10 +180,14 @@ export function NotebookPanel(){
       const output:Record<string,unknown>[]=[];
       if(report.report.output)output.push(streamOutput(report.report.output));
       if(!report.report.ok)output.push(errorOutput(report.report.error));
+      const executionCount=(cell.execution_count??0)+1;
+      if(report.report.ok && report.report.result!=="") {
+        output.push(executeResultOutput(report.report.result,executionCount));
+      }
       const latest=current.current;
       const actualIndex=latest?.cells.findIndex(c=>c.id===cell.id)??-1;
       if(latest&&actualIndex>=0){
-        let updated=withCell(latest,actualIndex,c=>({...c,execution_count:(c.execution_count??0)+1,
+        let updated=withCell(latest,actualIndex,c=>({...c,execution_count:executionCount,
           outputs:output,metadata:{...c.metadata,plusminus:{execution_mode:"isolated",metrics:report.report.metrics}}}));
         const hasLaterCode=updated.cells.slice(actualIndex+1).some(c=>c.cell_type==="code");
         if(!hasLaterCode){
@@ -153,7 +198,9 @@ export function NotebookPanel(){
         setStale(s=>({...s,[cell.id]:changedDuringExecution}));
         if(next){setSelected(Math.min(actualIndex+1,updated.cells.length-1));setVisibleCount(v=>Math.max(v,actualIndex+2));}
       }
-      setMessage(report.report.ok?"Cell executed in isolated process":"Native execution returned error");
+      setMessage(report.history_error?"Cell executed, but history persistence failed":
+        report.report.ok?"Cell executed in isolated process":"Native execution returned error");
+      if(report.history_error)setError("History was not saved: "+report.history_error);
       return report.report.ok;
     }catch(e){setError(String(e));return false;}
     finally{activeJob.current=null;setRunning(null);}
@@ -201,14 +248,14 @@ export function NotebookPanel(){
             </div>
             {cell.cell_type==="code"?
               index===selected?<CodeCell key={cell.id} selected source={value}
-                onChange={s=>replaceSource(index,s)} onRun={n=>void run(index,n)}/>:
+                onChange={s=>replaceSource(index,s)} onRun={n=>void run(index,n)} onSave={()=>void save()}/>:
                 <pre className="notebook-preview" onClick={()=>setSelected(index)}>{value||"(empty code cell)"}</pre>:
               <><textarea aria-label="Markdown cell" className="lab-textarea" value={value}
                 onFocus={()=>setSelected(index)} onChange={e=>replaceSource(index,e.target.value)}/>
               <div className="notebook-markdown"><ReactMarkdown>{value}</ReactMarkdown></div></>}
             {stale[cell.id]&&<div className="lab-error">Output is stale (source edited since execution)</div>}
             {cell.cell_type==="code" && <pre className="notebook-output">{
-              (cell.outputs??[]).map(out=>String(out.text??out.evalue??"")).join("\n")||"(no cell output)"
+              (cell.outputs??[]).map(outputText).filter(Boolean).join("\n")||"(no cell output)"
             }</pre>}
           </section>;
         })}
