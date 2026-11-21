@@ -103,7 +103,7 @@ pub fn build_fingerprint(root:&Path)->Result<String,String>{
     "Parser.h","tools/generate_native_tests.py"] {
     let p=root.join(relative);
     if p.is_file(){
-      digest.update(Path::new(relative).to_string_lossy().as_bytes());
+      digest.update(relative.replace('/',std::path::MAIN_SEPARATOR_STR).as_bytes());
       digest.update(fs::read(&p).map_err(|e|e.to_string())?);
     }
   }
