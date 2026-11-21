@@ -88,8 +88,10 @@ pub fn save(cases:Vec<UserCase>,expected_revision:String)->Result<UserBundle,Str
       let backup=target.with_extension(format!("{}.backup",std::process::id()));
       fs::rename(&target,&backup).map_err(|e|e.to_string())?;
       if let Err(e)=fs::rename(&tmp,&target){
-        let _=fs::rename(&backup,&target);
-        return Err(e.to_string());
+        return Err(match fs::rename(&backup,&target){
+          Ok(())=>e.to_string(),
+          Err(restore)=>format!("Failed to save tests: {e}; original at {} (restore: {restore})",backup.display()),
+        });
       }
       let _=fs::remove_file(&backup);
     }

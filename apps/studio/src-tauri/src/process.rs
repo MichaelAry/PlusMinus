@@ -119,8 +119,9 @@ pub fn decode_report(stdout: &[u8], exit_code: Option<i32>) -> Result<Value, Str
     }
     // Compile errors return ok=false AND exit 1: preserve the legitimate report.
     // Exit 0 with ok=false or exit nonzero with ok=true is a protocol mismatch.
-    if (exit_code == Some(0)) != (value["ok"] == true) {
-        return Err(format!("Runner response/exit mismatch: {exit_code:?}"));
+    let expected = if value["ok"] == true {Some(0)} else {Some(1)};
+    if exit_code != expected {
+        return Err(format!("Runner response/exit mismatch: expected {expected:?}, got {exit_code:?}"));
     }
     Ok(value)
 }
@@ -196,6 +197,11 @@ mod tests {
     fn nonzero_compile_error_is_not_transport_failure() {
         let data = EMPTY.replace(r#""ok":true"#, r#""ok":false"#);
         assert!(decode_report(data.as_bytes(), Some(1)).is_ok());
+    }
+    #[test]
+    fn cpp_exit_code_two_is_not_a_language_error(){
+        let failure=EMPTY.replace(r#""ok":true"#,r#""ok":false"#);
+        assert!(decode_report(failure.as_bytes(),Some(2)).is_err());
     }
     #[test]
     fn success_exit_mismatch_is_error() {

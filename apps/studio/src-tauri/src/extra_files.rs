@@ -92,12 +92,16 @@ pub fn save(root:&Path,relative:&str,source:&str,expected:&str)->Result<TextDocu
  let old=fs::read(&p).map_err(|e|e.to_string())?;
  if digest(&old)!=expected{return Err("Document changed externally; reopen before writing".into());}
  let parent=p.parent().ok_or("Missing parent")?;
+ let permissions=fs::metadata(&p).map_err(|e|e.to_string())?.permissions();
+ if permissions.readonly(){return Err("Document is read-only".into());}
  let candidate=parent.join(format!(".studio5-save-{}-{}",std::process::id(),now_nanos()));
  let result=(||->Result<(),String>{
    let mut out=fs::OpenOptions::new().create_new(true).write(true).open(&candidate)
        .map_err(|e|e.to_string())?;
    out.write_all(source.as_bytes()).map_err(|e|e.to_string())?;
+   out.set_permissions(permissions).map_err(|e|e.to_string())?;
    out.sync_all().map_err(|e|e.to_string())?;
+   drop(out);
    // QFile-like backup-and-replace: on Windows rename over an existing file
    // fails. Keep original if replacement fails; never silently truncate it.
    #[cfg(windows)]
@@ -105,8 +109,10 @@ pub fn save(root:&Path,relative:&str,source:&str,expected:&str)->Result<TextDocu
      let backup=parent.join(format!(".studio5-backup-{}-{}",std::process::id(),now_nanos()));
      fs::rename(&p,&backup).map_err(|e|e.to_string())?;
      if let Err(e)=fs::rename(&candidate,&p){
-       let _=fs::rename(&backup,&p);
-       return Err(e.to_string());
+       return Err(match fs::rename(&backup,&p){
+         Ok(())=>e.to_string(),
+         Err(restore)=>format!("Save failed: {e}; original retained at {} (restore failed: {restore})",backup.display()),
+       });
      }
      let _=fs::remove_file(&backup);
    }
@@ -125,8 +131,14 @@ pub fn create(root:&Path,relative:&str,source:&str)->Result<TextDocument,String>
  check_notebook(&value)?;
  let p=safe_path(root,relative,true)?;
  if p.exists(){return Err("File already exists".into());}
- fs::OpenOptions::new().create_new(true).write(true).open(&p)
-  .and_then(|mut f|f.write_all(source.as_bytes())).map_err(|e|e.to_string())?;
+ let written=(||->Result<(),String>{
+   let mut f=fs::OpenOptions::new().create_new(true).write(true).open(&p).map_err(|e|e.to_string())?;
+   f.write_all(source.as_bytes()).map_err(|e|e.to_string())?;
+   f.sync_all().map_err(|e|e.to_string())?;
+   Ok(())
+ })();
+ if written.is_err(){let _=fs::remove_file(&p);}
+ written?;
  Ok(TextDocument{path:relative.into(),source:source.into(),digest:digest(source.as_bytes())})
 }
 
