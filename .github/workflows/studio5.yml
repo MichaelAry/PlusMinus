@@ -1,0 +1,116 @@
+name: Studio 5 Tauri foundation (experimental)
+
+on:
+  push:
+    branches: ['feature/studio5-*']
+    paths:
+      - 'apps/studio/**'
+      - 'scripts/stage-native.mjs'
+      - '.github/workflows/studio5.yml'
+      - 'src/**'
+      - 'include/**'
+      - 'ide/runner.cpp'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+  pull_request:
+    paths:
+      - 'apps/studio/**'
+      - 'scripts/stage-native.mjs'
+      - '.github/workflows/studio5.yml'
+      - 'src/**'
+      - 'include/**'
+      - 'ide/runner.cpp'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio5-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundation:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-2022
+            triple: x86_64-pc-windows-msvc
+          - platform: linux-x64
+            os: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+          - platform: macos-x64
+            os: macos-15-intel
+            triple: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ pkg-config libwebkit2gtk-4.1-dev \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'apps/studio/src-tauri -> target'
+
+      - name: Configure original C++ project
+        run: cmake -S . -B build/studio5 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build original C++ binaries
+        run: cmake --build build/studio5 --config Release --parallel 2
+
+      - name: Native C++ smoke and quick suite
+        run: ctest --test-dir build/studio5 -C Release --output-on-failure
+
+      - name: Stage sidecars for Tauri
+        run: node scripts/stage-native.mjs --build-dir build/studio5 --target ${{ matrix.triple }}
+
+      - name: Install frontend dependencies
+        working-directory: apps/studio
+        run: npm install --no-audit --no-fund
+
+      - name: Frontend tests and typecheck
+        working-directory: apps/studio
+        run: |
+          npm run test
+          npm run typecheck
+          npm run build:ui
+
+      - name: Rust unit tests
+        working-directory: apps/studio/src-tauri
+        run: cargo test
+
+      - name: Tauri package
+        working-directory: apps/studio
+        run: npm run tauri build
+
+      - name: Verify package output
+        shell: bash
+        run: |
+          test -d apps/studio/src-tauri/target/release/bundle
+          find apps/studio/src-tauri/target/release/bundle -type f | head -50
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PlusMinus-Studio5-${{ matrix.platform }}
+          path: apps/studio/src-tauri/target/release/bundle/
+          if-no-files-found: error
