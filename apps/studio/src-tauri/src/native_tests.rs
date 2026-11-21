@@ -33,13 +33,26 @@ pub enum NativeEvent {
 
 pub async fn discover(app: &AppHandle) -> Result<Vec<NativeCase>,String> {
     let executable=process::resolve_native(app,"plusminus_native_tests")?;
-    let output=tokio::time::timeout(Duration::from_secs(12),Command::new(executable)
-      .arg("--list").stdin(Stdio::null()).kill_on_drop(true).output())
-      .await.map_err(|_|"Native manifest discovery timed out".to_string())?
-      .map_err(|e|e.to_string())?;
-    if !output.status.success(){return Err(format!("Native discovery failed: {}",String::from_utf8_lossy(&output.stderr)));}
-    if output.stdout.len()>2*1024*1024{return Err("Native test list exceeds limit".into());}
-    let text=std::str::from_utf8(&output.stdout).map_err(|e|e.to_string())?;
+    let mut child=Command::new(executable).arg("--list").stdin(Stdio::null())
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true)
+        .spawn().map_err(|e|e.to_string())?;
+    let stdout=child.stdout.take().ok_or("Native manifest stdout missing")?;
+    let stderr=child.stderr.take().ok_or("Native manifest stderr missing")?;
+    let execution=async{
+        tokio::try_join!(
+            async {child.wait().await.map_err(|e|e.to_string())},
+            process::read_capped(stdout,2*1024*1024),
+            process::read_capped(stderr,128*1024)
+        )
+    };
+    let result=tokio::time::timeout(Duration::from_secs(12),execution).await;
+    if !matches!(&result,Ok(Ok(_))){
+        let _=child.start_kill();
+        let _=tokio::time::timeout(Duration::from_secs(2),child.wait()).await;
+    }
+    let (status,bytes,stderr)=result.map_err(|_|"Native manifest discovery timed out".to_string())??;
+    if !status.success(){return Err(format!("Native discovery failed: {}",String::from_utf8_lossy(&stderr)));}
+    let text=std::str::from_utf8(&bytes).map_err(|e|e.to_string())?;
     let mut result=Vec::new();let mut ids=HashSet::new();
     for line in text.lines().filter(|line|!line.trim().is_empty()){
         let row:serde_json::Value=serde_json::from_str(line).map_err(|e|e.to_string())?;
