@@ -55,7 +55,10 @@ fn verify(db: &Connection) -> Result<(), String> {
 }
 
 pub fn initialize() -> Result<PathBuf, String> {
-    let dest = path_v5()?;
+    initialize_at(path_v5()?)
+}
+
+fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
     if !dest.exists() {
         let old = dest.with_file_name("studio.db");
         let temp = dest.with_extension(format!("db.migration-{}.tmp", std::process::id()));
@@ -335,6 +338,57 @@ mod tests {
         let db=Connection::open_in_memory().unwrap();
         assert!(count_table(&db,"made_up").is_err());
     }
+    #[test] fn real_disk_studio4_migration_is_lossless_and_read_only(){
+        let base=std::env::temp_dir().join(format!("studio5-migration-fixture-{}-{}",
+            std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&base).unwrap();
+        let old=base.join("studio.db");
+        {
+            let db=Connection::open(&old).unwrap();
+            db.execute_batch(
+                "CREATE TABLE runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,created TEXT NOT NULL,category TEXT NOT NULL,
+                    label TEXT NOT NULL,ok INTEGER NOT NULL,elapsed_ms REAL NOT NULL,
+                    source_hash TEXT NOT NULL,details TEXT NOT NULL
+                );
+                CREATE TABLE native_sessions (
+                    id INTEGER PRIMARY KEY,timestamp TEXT NOT NULL,label TEXT NOT NULL,
+                    git_sha TEXT NOT NULL,source_hash TEXT NOT NULL,dirty INTEGER NOT NULL,
+                    platform TEXT NOT NULL,total_ms REAL NOT NULL
+                );
+                CREATE TABLE native_results (
+                    session_id INTEGER NOT NULL,test_id TEXT NOT NULL,category TEXT NOT NULL,
+                    status TEXT NOT NULL,elapsed_ms REAL NOT NULL,error TEXT NOT NULL,
+                    source TEXT NOT NULL,peak_rss_mb REAL,cpu_ms REAL,
+                    PRIMARY KEY(session_id,test_id)
+                );
+                CREATE TABLE native_baseline (name TEXT PRIMARY KEY,session_id INTEGER NOT NULL);
+                INSERT INTO runs(created,category,label,ok,elapsed_ms,source_hash,details)
+                    VALUES('old','Run','historic',1,2.5,'hash','{}');
+                INSERT INTO native_sessions VALUES
+                    (7,'old','full','sha','hash',0,'linux',12.0);
+                INSERT INTO native_results VALUES
+                    (7,'Parser.Case','Parser','FAIL',12.0,'historical','tests/portable/parser.cpp',NULL,NULL);
+                INSERT INTO native_baseline VALUES('default',7);"
+            ).unwrap();
+        }
+        let old_hash=Sha256::digest(fs::read(&old).unwrap());
+        let target=base.join("studio-v5.db");
+        initialize_at(target.clone()).unwrap();
+        let migrated=Connection::open(&target).unwrap();
+        for table in ["runs","native_sessions","native_results","native_baseline"]{
+            assert_eq!(count_table(&migrated,table).unwrap(),1,"table {table}");
+        }
+        assert_eq!(migrated.query_row("SELECT session_id FROM native_baseline WHERE name='default'",
+            [],|r|r.get::<_,i64>(0)).unwrap(),7);
+        assert_eq!(migrated.query_row("SELECT test_ms FROM native_results LIMIT 1",
+            [],|r|r.get::<_,Option<f64>>(0)).unwrap(),None);
+        let _=initialize_at(target).unwrap(); // repeated init must not overwrite rows
+        assert_eq!(Sha256::digest(fs::read(&old).unwrap()),old_hash);
+        drop(migrated);
+        fs::remove_dir_all(base).unwrap();
+    }
+
     #[test] fn sqlite_backup_preserves_original_rows(){
         let original=Connection::open_in_memory().unwrap();
         original.execute_batch("CREATE TABLE runs (id INTEGER PRIMARY KEY, label TEXT);
