@@ -175,7 +175,7 @@ class NotebookCell(QFrame):
         if not report.get("ok"):
             outputs.append(error_output(report.get("error") or "Execution failed"))
         result = report.get("result")
-        if result is not None and result != "":
+        if report.get("ok") and result is not None and result != "":
             outputs.append({
                 "output_type": "execute_result",
                 "execution_count": counter,

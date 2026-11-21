@@ -1305,6 +1305,15 @@ class Studio(QMainWindow):
         title = ('Trace' if mode == 'trace' else 'Profile' if profile else
                  'Compile' if mode == 'compile' else 'Run')
         self.reveal_run_report()
+        if self.native_building or any(
+                isinstance(job, NativeTestJob) and job.isRunning()
+                or getattr(job, 'task_kind', '') == 'suite' and job.isRunning()
+                for job in self.jobs):
+            message = 'A build or test suite is active. Finish it before running a program.'
+            self.output.setPlainText('(No execution performed)')
+            self.run_details.setPlainText(message)
+            self.statusBar().showMessage(message, 7500)
+            return
         if not self.runner:
             message = 'C++ runner missing or stale. Rebuild PlusMinus before executing.'
             self.output.setPlainText('(No execution performed)')
@@ -1418,7 +1427,10 @@ class Studio(QMainWindow):
 
     def stop(self):
         self.cancel.set()
-        self.statusBar().showMessage('Stop requested. Active VM executions will be interrupted.',5000)
+        if hasattr(self, 'notebooks'):
+            self.notebooks.interrupt()
+        self.statusBar().showMessage(
+            'Stop requested. Active source and notebook VM processes will be interrupted.', 5000)
 
     def test_cases(self):
         return [(dict(case), 'Built-in') for case in BUILTIN_TESTS] + [(dict(case),'User') for case in self.user_tests]
@@ -1475,6 +1487,11 @@ class Studio(QMainWindow):
         self.run_test_batch([cases[selected]], 'Selected test')
 
     def run_test_batch(self, cases, title):
+        if any((isinstance(job, NativeTestJob) or
+                getattr(job, 'task_kind', '') in ('execution', 'suite'))
+               and job.isRunning() for job in self.jobs):
+            self.error('Another VM/test execution is running; finish it before starting tests.')
+            return
         self.cancel.clear()
         self.test_progress.setValue(0)
         self.test_summary.setText(f'{title}: executing {len(cases)} cases...')
@@ -1489,7 +1506,8 @@ class Studio(QMainWindow):
                 passed, detail = judge_test(case,report)
                 results.append((case,suite,passed,detail,report))
             return results
-        self.spawn(work, self.show_test_results, title)
+        job = self.spawn(work, self.show_test_results, title)
+        job.task_kind = 'suite'
 
     def show_test_results(self, results):
         entries = []
@@ -1598,6 +1616,8 @@ class Studio(QMainWindow):
             if cell and cell.data(Qt.ItemDataRole.UserRole) == identifier:
                 self.native_panel.table.selectRow(row)
                 self.start_native_tests('selected')
+                if hasattr(self, 'test_analysis'):
+                    self.test_suites.setCurrentIndex(2)
                 return
         self.error(f'Native test not found: {identifier}')
 
