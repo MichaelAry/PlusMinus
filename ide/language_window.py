@@ -13,26 +13,12 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QMainW
                                QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
 
 from internals import SYMBOLS, SourceTarget, editable_checkout, locate_target, source_targets
+from highlighting import CppHighlighter
 
 
-class CppSyntax(QSyntaxHighlighter):
-    def __init__(self, document):
-        super().__init__(document)
-        self.rules = []
-        for regex, color in [
-            (r'\b(?:class|struct|enum|namespace|void|bool|double|int|auto|return|break|continue|if|else|while|for|switch|case|const|static|public|private|try|catch|throw|using|std|size_t|true|false|nullptr|template|typename)\b', '#b9c9e7'),
-            (r'"(?:\\.|[^"\\])*"', '#a8cdb1'),
-            (r'//[^\n]*', '#8995a5'),
-            (r'#\s*(?:include|define|ifdef|ifndef|endif|pragma)\b', '#d8c28c'),
-        ]:
-            fmt = QTextCharFormat()
-            fmt.setForeground(QColor(color))
-            self.rules.append((re.compile(regex), fmt))
-
-    def highlightBlock(self, text):
-        for regex, fmt in self.rules:
-            for match in regex.finditer(text):
-                self.setFormat(match.start(), match.end() - match.start(), fmt)
+class CppSyntax(CppHighlighter):
+    """C++ source highlighter shared with Studio 3."""
+    pass
 
 
 class LanguageSourceWindow(QMainWindow):

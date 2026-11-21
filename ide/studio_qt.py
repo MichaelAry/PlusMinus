@@ -34,6 +34,7 @@ from internals import keyword_at, editable_checkout
 from language_window import LanguageSourceWindow
 from workspace import WorkspaceTabs
 from documents import DocumentTabs
+from highlighting import PlusMinusHighlighter
 
 try:
     import psutil
@@ -287,27 +288,9 @@ class CodeEditor(QPlainTextEdit):
             bottom = top + int(self.blockBoundingRect(block).height())
             number += 1
 
-class Syntax(QSyntaxHighlighter):
-    def __init__(self, document):
-        super().__init__(document)
-        self.rules = []
-        for pattern, color, bold in [
-            (r'\b(?:if|else|while|func|proc|return|go|sync|lock|unlock)\b', '#a9bdde', True),
-            (r'\b(?:print|len|resize|sin|cos|pow|fact|multifact)\b', '#b9d1bc', True),
-            (r'\b\d+(?:\.\d+)?\b', '#ddbe90', False),
-            (r'"(?:\\.|[^"\\])*"', '#b7ccae', False),
-            (r'//[^\n]*', '#748195', False),
-        ]:
-            fmt = QTextCharFormat()
-            fmt.setForeground(QColor(color))
-            if bold:
-                fmt.setFontWeight(QFont.Weight.Bold)
-            self.rules.append((re.compile(pattern), fmt))
-
-    def highlightBlock(self, text):
-        for regex, fmt in self.rules:
-            for match in regex.finditer(text):
-                self.setFormat(match.start(), match.end()-match.start(), fmt)
+class Syntax(PlusMinusHighlighter):
+    """Backward-compatible name for the PlusMinus syntax highlighter."""
+    pass
 
 
 class Job(QThread):
