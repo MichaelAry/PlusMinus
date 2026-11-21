@@ -9,6 +9,8 @@ class SourceDocument:
     editor: object
     path: Path | None
     saved: str
+    line_ending: str = '\n'
+    bom: bool = False
 
     @property
     def modified(self):
@@ -35,9 +37,12 @@ class DocumentTabs(QTabWidget):
     def all_documents(self):
         return list(self._documents.values())
 
-    def new_document(self, content='', path=None):
+    def new_document(self, content='', path=None, bom=False):
         editor = self.factory()
-        doc = SourceDocument(editor, Path(path).resolve() if path else None, content)
+        newline = '\r\n' if '\r\n' in content else ('\r' if '\r' in content else '\n')
+        content = content.replace('\r\n','\n').replace('\r','\n')
+        doc = SourceDocument(editor, Path(path).resolve() if path else None,
+                             content, newline, bom)
         self._documents[editor] = doc
         index = self.addTab(editor, '')
         editor.setPlainText(content)
@@ -54,7 +59,9 @@ class DocumentTabs(QTabWidget):
             if doc.path == path:
                 self.setCurrentWidget(doc.editor)
                 return doc
-        return self.new_document(path.read_text(encoding='utf-8-sig'), path)
+        raw = path.read_bytes()
+        return self.new_document(raw.decode('utf-8-sig'), path,
+                                 raw.startswith(b'\xef\xbb\xbf'))
 
     def _update_caption(self, editor):
         doc = self._documents.get(editor)
@@ -85,7 +92,9 @@ class DocumentTabs(QTabWidget):
                 return False
             doc.path = dest
         try:
-            doc.path.write_text(doc.editor.toPlainText(), encoding='utf-8')
+            content = doc.editor.toPlainText().replace('\n', doc.line_ending)
+            payload = (b'\xef\xbb\xbf' if doc.bom else b'') + content.encode('utf-8')
+            doc.path.write_bytes(payload)
         except OSError as exc:
             QMessageBox.critical(self, 'Save failed', str(exc))
             return False
