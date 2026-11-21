@@ -140,8 +140,16 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
 }
 
 fn now() -> String {
-    SystemTime::now().duration_since(UNIX_EPOCH)
-        .unwrap_or_default().as_secs().to_string()
+    // Python Studio 4 stores UTC ISO-8601 timestamps. Preserve sortable,
+    // human-readable date strings for all new Studio 5 sessions and runs.
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_|"1970-01-01T00:00:00Z".into())
+}
+fn platform_tag(os: &str) -> &str {
+    // Python sys.platform and Rust std::env::consts::OS use different labels.
+    // Normalize for *comparison* without editing legacy Qt database rows.
+    match os { "windows"|"win32"=>"win32", "macos"|"darwin"=>"darwin", other=>other }
 }
 
 fn connect() -> Result<Connection, String> {
@@ -308,7 +316,7 @@ pub fn save_native_session(label: &str, results: &[NativeResult], root: Option<&
     let tx=db.transaction().map_err(|e| e.to_string())?;
     tx.execute("INSERT INTO native_sessions(timestamp,label,git_sha,source_hash,dirty,platform,total_ms)
                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
-       params![now(),label,sha,hash,i64::from(dirty),std::env::consts::OS,
+       params![now(),label,sha,hash,i64::from(dirty),platform_tag(std::env::consts::OS),
           results.iter().map(|r|r.elapsed_ms).sum::<f64>()])
        .map_err(|e|e.to_string())?;
     let sid=tx.last_insert_rowid();
@@ -403,13 +411,24 @@ pub fn compare(base_id:i64,current_id:i64)->Result<Value,String>{
     let cmeta=get_meta(current_id)?;
     Ok(json!({"introduced":introduced,"fixed":fixed,"remaining_failures":remaining,
       "added":added,"missing":missing,"performance":timings,"baseline":bmeta,
-      "current":cmeta,"comparable_platform":bmeta["platform"]==cmeta["platform"],
+      "current":cmeta,"comparable_platform":platform_tag(bmeta["platform"].as_str().unwrap_or(""))==
+          platform_tag(cmeta["platform"].as_str().unwrap_or("")),
       "same_source":bmeta["source_hash"]==cmeta["source_hash"]}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn qt_and_rust_platform_names_compare_equal(){
+        assert_eq!(platform_tag("windows"),platform_tag("win32"));
+        assert_eq!(platform_tag("macos"),platform_tag("darwin"));
+        assert_ne!(platform_tag("linux"),platform_tag("darwin"));
+    }
+    #[test] fn session_timestamp_uses_utc_iso_8601(){
+        let stamp=now();
+        assert!(stamp.contains('T')&&stamp.ends_with('Z'),"{stamp}");
+        assert!(stamp.starts_with("20"),"{stamp}");
+    }
     #[test] fn history_reports_stream_all_rows_without_losing_json(){
         let db=Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runs (
