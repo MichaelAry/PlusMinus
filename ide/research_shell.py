@@ -4,6 +4,7 @@ The existing Studio controller continues to own C++ execution and test services.
 The shell only composes their views; it does not duplicate or simulate data.
 """
 from pathlib import Path
+import sys
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
@@ -158,9 +159,10 @@ class ResearchController:
         mode = self.host.settings.value("research_mode_v4", "")
         if mode in MODE_TARGETS:
             self.active_mode = mode
+            self.host.nav.setCurrentRow(MODE_TARGETS[mode])
             for name, button in self.controls.items():
                 button.setChecked(name == mode)
-        # The visible pages remain under the user's document-session settings.
+        # Dock visibility comes from restoreState(), not from activating presets.
 
     def save_layout(self):
         self.host.settings.setValue("research_docks_v4", self.host.saveState(4))
@@ -237,7 +239,10 @@ def build_research_shell(host, root):
     )
     for title, factory in zip(PAGE_NAMES, pages):
         host.workspace.register_page(title, factory())
-    host.notebooks = NotebookView(root, host)
+    notebook_root = (Path.home() / "Documents") if getattr(sys, "frozen", False) else root
+    if not notebook_root.is_dir():
+        notebook_root = Path.home()
+    host.notebooks = NotebookView(notebook_root, host)
     host.notebooks.statusChanged.connect(host.statusBar().showMessage)
     host.workspace.register_page("Notebooks", host.notebooks)
     frame.addWidget(host.workspace, 1)

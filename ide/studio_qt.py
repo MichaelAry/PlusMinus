@@ -500,7 +500,6 @@ class Studio(QMainWindow):
         self.make_shell()
         self.load_user_tests()
         self.restore_session()
-        self.nav.setCurrentRow(0)
         self.update_analysis()
         self.refresh_history()
         self.statusBar().showMessage('Ready — startup regression suite scheduled')
@@ -1202,6 +1201,9 @@ class Studio(QMainWindow):
         self.update_analysis()
         if hasattr(self, 'research_controller'):
             self.research_controller.restore_layout()
+        notebook_path = self.settings.value('last_notebook_v4', '')
+        if notebook_path and Path(str(notebook_path)).is_file():
+            self.notebooks.open_file(Path(str(notebook_path)))
 
     def record(self, category, label_text, source, report):
         metrics = report.get('metrics', {})
@@ -1772,6 +1774,10 @@ class Studio(QMainWindow):
         self.settings.setValue('split_editor',self.split_pane.isVisible())
         if hasattr(self, 'research_controller'):
             self.research_controller.save_layout()
+        if hasattr(self, 'notebooks'):
+            self.settings.setValue(
+                'last_notebook_v4',
+                str(self.notebooks.path) if self.notebooks.path else '')
         event.accept()
 
 
