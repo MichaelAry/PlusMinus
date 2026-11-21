@@ -18,7 +18,7 @@ from collections import Counter
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, QSettings, Signal, QPointF, QRectF
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QSyntaxHighlighter, QTextCharFormat, QAction
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QAction
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QPlainTextEdit, QSplitter, QTableWidget, QTableWidgetItem,
@@ -36,6 +36,7 @@ from workspace import WorkspaceTabs
 from documents import DocumentTabs
 from native_test_view import NativeTestPanel
 from highlighting import CppHighlighter
+from source_diagnostics import analyze_diagnostics
 from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
 
@@ -234,6 +235,32 @@ class CodeEditor(QPlainTextEdit):
         self.blockCountChanged.connect(self.update_gutter_width)
         self.updateRequest.connect(self.update_gutter)
         self.update_gutter_width(0)
+        self._diagnostic_lines = set()
+
+    def set_diagnostics(self, issues):
+        markers = []
+        highlights = set()
+        for issue in issues:
+            number = int(issue.get('line') or 0)
+            column = int(issue.get('column') or 1)
+            block = self.document().findBlockByNumber(number-1)
+            if not block.isValid():
+                continue
+            highlights.add(number)
+            marker = QTextEdit.ExtraSelection()
+            cursor = self.textCursor()
+            cursor.setPosition(min(block.position()+max(0,column-1),
+                                   block.position()+max(0,block.length()-1)))
+            cursor.movePosition(QTextCursor.MoveOperation.NextCharacter,
+                                QTextCursor.MoveMode.KeepAnchor)
+            marker.cursor = cursor
+            marker.format.setUnderlineColor(
+                QColor('#F08A8A' if issue.get('severity')=='error' else '#D9B579'))
+            marker.format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+            markers.append(marker)
+        self._diagnostic_lines = highlights
+        self.setExtraSelections(markers)
+        self.gutter.update()
 
     def mousePressEvent(self, event):
         if (event.button() == Qt.MouseButton.LeftButton and
@@ -283,7 +310,8 @@ class CodeEditor(QPlainTextEdit):
         bottom = top + int(self.blockBoundingRect(block).height())
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
-                painter.setPen(QColor('#91a0b6'))
+                painter.setPen(QColor('#E58C8C' if number+1 in self._diagnostic_lines
+                                      else '#91a0b6'))
                 painter.drawText(0,top,self.gutter.width()-7,
                     self.fontMetrics().height(),Qt.AlignmentFlag.AlignRight,str(number+1))
             block = block.next()
@@ -378,6 +406,10 @@ class Studio(QMainWindow):
         self.analysis_timer.setSingleShot(True)
         self.analysis_timer.setInterval(300)
         self.analysis_timer.timeout.connect(self.update_analysis)
+        self.diagnostic_timer = QTimer(self)
+        self.diagnostic_timer.setSingleShot(True)
+        self.diagnostic_timer.setInterval(650)
+        self.diagnostic_timer.timeout.connect(self.request_compile_diagnostics)
         QTimer.singleShot(450, self.auto_tests)
         QTimer.singleShot(1200, self.discover_native)
 
@@ -523,13 +555,20 @@ class Studio(QMainWindow):
         self.output.setReadOnly(True)
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
+        problems_widget = QWidget()
+        problems_layout = QVBoxLayout(problems_widget)
+        problems_layout.setContentsMargins(2,2,2,2)
+        self.problems_table = table(['Severity', 'Code', 'Line', 'Column', 'Description'])
+        self.problems_table.doubleClicked.connect(self.jump_to_problem)
+        problems_layout.addWidget(self.problems_table, 2)
+        problems_layout.addWidget(self.diagnostics, 1)
         self.bytecode = QPlainTextEdit()
         self.bytecode.setReadOnly(True)
         self.variables = QPlainTextEdit()
         self.variables.setReadOnly(True)
-        for name, widget in [('Output',self.output),('Diagnostics',self.diagnostics),
-                             ('Bytecode',self.bytecode),('Variables',self.variables)]:
-            results.addTab(widget,name)
+        for title, widget in [('Output',self.output),('Problems',problems_widget),
+                              ('Bytecode',self.bytecode),('Variables',self.variables)]:
+            results.addTab(widget,title)
         self.result_tabs = results
         layout.addWidget(results, 2)
         return page_widget
