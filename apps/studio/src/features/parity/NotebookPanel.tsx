@@ -5,6 +5,7 @@ import { native } from "../../api/native";
 import { parity, freshJobId } from "../../api/parity";
 import { useStudio } from "../../model/studio";
 import { freshNotebook, validateNotebook, encodeNotebook, withCell, makeCell, sourceText, streamOutput, errorOutput,
+  rememberNotebookDraft, recoverNotebookDraft, latestNotebookDraft, discardNotebookDraft,
   type Notebook, type NotebookCell } from "../../model/notebook";
 
 function CodeCell({source,onChange,onRun,selected}:{source:string;onChange:(v:string)=>void;onRun:(next:boolean)=>void;selected:boolean}){
@@ -46,8 +47,18 @@ export function NotebookPanel(){
   const [message,setMessage]=useState("");
   const [visibleCount,setVisibleCount]=useState(40);
   const openRef=useRef<(path:string)=>Promise<void>>(async()=>{});
+  const saveRef=useRef<()=>Promise<void>>(async()=>{});
   const open=async(p:string)=>{
-    if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
+    if(dirty) {
+      if(!window.confirm("Discard unsaved notebook changes?")) return;
+      if(workspace && path) discardNotebookDraft(workspace,path);
+    }
+    const cached=workspace?recoverNotebookDraft(workspace,p):null;
+    if(cached){
+      setPath(p);setNotebook(cached.notebook);current.current=cached.notebook;
+      setDigest(cached.digest);setSelected(cached.selected);setStale(cached.stale);
+      setDirty(true);setError("");setMessage("Recovered unsaved notebook "+p);return;
+    }
     try {
       const doc=await parity.openDocument(p);
       const parsed=validateNotebook(JSON.parse(doc.source.replace(/^\uFEFF/,"")));
@@ -70,19 +81,27 @@ export function NotebookPanel(){
     return()=>window.removeEventListener("studio:notebook-open",handler);
   },[workspace]);
   useEffect(() => {
-    setNotebook(null);current.current=null;setPath("");setDigest("");setDirty(false);setStale({});setSelected(0);
+    const recovered=workspace?latestNotebookDraft(workspace):null;
+    if(recovered){
+      const {path:cachedPath,draft}=recovered;
+      setPath(cachedPath);setNotebook(draft.notebook);current.current=draft.notebook;
+      setDigest(draft.digest);setDirty(true);setStale(draft.stale);setSelected(draft.selected);
+    }else{
+      setNotebook(null);current.current=null;setPath("");setDigest("");setDirty(false);setStale({});setSelected(0);
+    }
   },[workspace]);
 
   useEffect(()=>{
     const onSwitch=(event:Event)=>{
       if(activeJob.current){event.preventDefault();setError("Stop notebook execution before changing workspace");return;}
-      if(dirty&&!window.confirm("Discard unsaved notebook changes?"))event.preventDefault();
+      // App-level guard handles dirty drafts even when this Dockview panel is closed.
     };
     window.addEventListener("studio:workspace-switch",onSwitch);
     return()=>window.removeEventListener("studio:workspace-switch",onSwitch);
   },[dirty]);
   const update=(next:Notebook)=>{
     current.current=next;setNotebook(next);setDirty(true);
+    if(workspace && path) rememberNotebookDraft(workspace,path,{notebook:next,digest,selected,stale});
   };
   const create=async()=>{
     if(!workspace){setError("Choose workspace first");return;}
@@ -103,10 +122,21 @@ export function NotebookPanel(){
     try{
       const result=await parity.saveDocument(path,source,digest);
       setDigest(result.digest);
-      if(sameString(encodeNotebook(current.current??notebook),source))setDirty(false);
+      if(sameString(encodeNotebook(current.current??notebook),source)){
+        setDirty(false);
+        if(workspace)discardNotebookDraft(workspace,path);
+      }else if(workspace){
+        rememberNotebookDraft(workspace,path,{notebook:current.current??notebook,digest:result.digest,selected,stale});
+      }
       setMessage("Saved "+path);setError("");
     }catch(e){setError(String(e));}
   };
+  saveRef.current=save;
+  useEffect(()=>{
+    const handler=()=>void saveRef.current();
+    window.addEventListener("studio:save-notebook",handler);
+    return()=>window.removeEventListener("studio:save-notebook",handler);
+  },[]);
   const replaceSource=(index:number,source:string)=>{
     const n=current.current;if(!n)return;
     const cell=n.cells[index]; if(!cell)return;

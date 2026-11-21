@@ -4,6 +4,7 @@ import { native } from "./api/native";
 import { parity } from "./api/parity";
 import type { RunMode, TreeEntry } from "./api/contracts";
 import { useStudio } from "./model/studio";
+import { hasUnsavedNotebookDrafts, discardWorkspaceNotebooks } from "./model/notebook";
 import { EditorPane } from "./features/editor/EditorPane";
 import { OutputPane } from "./features/output/OutputPane";
 import { TestLab } from "./features/parity/TestLab";
@@ -65,11 +66,12 @@ export default function App() {
   },[setEntries]);
   const chooseWorkspace=useCallback(async()=>{
     if(!window.dispatchEvent(new Event("studio:workspace-switch",{cancelable:true})))return;
-    if(useStudio.getState().documents.some(d=>d.dirty)&&
-      !window.confirm("Switch workspace and discard unsaved documents?"))return;
+    if((useStudio.getState().documents.some(d=>d.dirty)||hasUnsavedNotebookDrafts(workspace))&&
+      !window.confirm("Switch workspace and discard unsaved documents/notebooks?"))return;
     try{
       const folder=await native.chooseWorkspace();
       const tree=await native.listWorkspace();
+      if(workspace)discardWorkspaceNotebooks(workspace);
       setWorkspace(folder,tree);
       setMessage("Workspace selected: "+folder);
     }catch(e){setMessage(String(e));}
@@ -102,6 +104,9 @@ export default function App() {
     },50));
   },[open,showPanel]);
   const saveFile=useCallback(async()=>{
+    if(dockApi.current?.activePanel?.id==="tool-notebook"){
+      window.dispatchEvent(new Event("studio:save-notebook"));return;
+    }
     const state=useStudio.getState(),doc=state.documents.find(d=>d.id===state.activeId);
     if(!doc||busy)return;
     if(!state.workspace){setMessage("Select a workspace before saving");return;}
@@ -158,6 +163,15 @@ export default function App() {
       window.removeEventListener("studio:refresh-workspace",refreshEvent);
     };
   },[openFile,refresh]);
+  useEffect(()=>{
+    const guard=(e:BeforeUnloadEvent)=>{
+      if(hasUnsavedNotebookDrafts()||useStudio.getState().documents.some(d=>d.dirty)){
+        e.preventDefault();e.returnValue="";
+      }
+    };
+    window.addEventListener("beforeunload",guard);
+    return()=>window.removeEventListener("beforeunload",guard);
+  },[]);
   useEffect(()=>{
     function onKey(e:KeyboardEvent){
       if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==="p"){

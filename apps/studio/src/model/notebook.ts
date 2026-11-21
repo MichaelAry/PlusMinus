@@ -42,11 +42,29 @@ export function validateNotebook(parsed: unknown): Notebook {
   if (n.nbformat !== 4 || !Array.isArray(n.cells) || n.cells.length > 2000) throw new Error("Only Jupyter v4 notebooks with ≤2000 cells");
   if (n.metadata?.kernelspec?.name && !n.metadata.kernelspec.name.startsWith("plusminus")) throw new Error("Notebook kernel is not PlusMinus");
   if (n.metadata?.language_info?.name && n.metadata.language_info.name !== "plusminus") throw new Error("Notebook language is not PlusMinus");
+  if (!n.metadata || typeof n.metadata !== "object" || Array.isArray(n.metadata)) n.metadata = {};
+  const ids = new Set<string>();
   for (const cell of n.cells) {
+    if (!cell || typeof cell !== "object") throw new Error("Notebook cell must be an object");
     if (cell.cell_type !== "code" && cell.cell_type !== "markdown") throw new Error("Only code and Markdown cells can be edited");
     if (typeof cell.source !== "string" && !(Array.isArray(cell.source) && cell.source.every((s) => typeof s === "string"))) throw new Error("Invalid cell source");
-    if (!cell.metadata || typeof cell.metadata !== "object") throw new Error("Invalid cell metadata");
-    if (cell.cell_type === "code" && (!Array.isArray(cell.outputs) || !cell.outputs.every((o) => o && typeof o === "object"))) throw new Error("Invalid outputs");
+    // Jupyter notebook v4.0-v4.4 may have no cell ids. Studio 4 adds them at
+    // validation time. Never use undefined as a key for executed cell results.
+    if (typeof cell.id !== "string" || !cell.id.trim() || ids.has(cell.id)) {
+      let next: string;
+      do { next = crypto.randomUUID().replaceAll("-", "").slice(0, 8); } while (ids.has(next));
+      cell.id = next;
+    }
+    ids.add(cell.id);
+    if (!cell.metadata || typeof cell.metadata !== "object" || Array.isArray(cell.metadata)) cell.metadata = {};
+    if (cell.cell_type === "code") {
+      if (cell.execution_count === undefined) cell.execution_count = null;
+      if (cell.outputs === undefined) cell.outputs = [];
+      if (!Array.isArray(cell.outputs) || !cell.outputs.every(o => o && typeof o === "object" && !Array.isArray(o))) throw new Error("Invalid outputs");
+      if (cell.execution_count !== null &&
+        (!Number.isInteger(cell.execution_count) || (cell.execution_count as number) < 0))
+        throw new Error("Invalid notebook execution_count");
+    }
   }
   return n;
 }
@@ -61,4 +79,38 @@ export function streamOutput(content: string): Record<string, unknown> {
 }
 export function errorOutput(content: string): Record<string, unknown> {
   return { output_type: "error", ename:"PlusMinusError",evalue:content,traceback:[content] };
+}
+
+/** Recover unsaved edits when a Dockview notebook panel is closed/reopened.
+ * This is process-local (no silent file writes or replacement of original .ipynb). */
+export interface NotebookDraft {
+  notebook: Notebook; digest: string; selected: number; stale: Record<string, boolean>;
+}
+const drafts = new Map<string, NotebookDraft>();
+const keyOf = (workspace: string, path: string) => JSON.stringify([workspace,path]);
+export function rememberNotebookDraft(workspace: string, path: string, draft: NotebookDraft) {
+  if (workspace && path) drafts.set(keyOf(workspace,path),draft);
+}
+export function recoverNotebookDraft(workspace: string, path: string) {
+  return drafts.get(keyOf(workspace,path)) ?? null;
+}
+export function latestNotebookDraft(workspace: string): {path:string;draft:NotebookDraft}|null {
+  for (const [key,draft] of [...drafts].reverse()) {
+    const [root,path]=JSON.parse(key) as [string,string];
+    if (root===workspace) return {path,draft};
+  }
+  return null;
+}
+export function discardNotebookDraft(workspace:string,path:string) {
+  drafts.delete(keyOf(workspace,path));
+}
+export function discardWorkspaceNotebooks(workspace:string) {
+  for (const key of drafts.keys()) {
+    const [root]=JSON.parse(key) as [string,string];
+    if (root===workspace) drafts.delete(key);
+  }
+}
+export function hasUnsavedNotebookDrafts(workspace?:string|null) {
+  if (!workspace) return drafts.size>0;
+  return latestNotebookDraft(workspace)!==null;
 }
