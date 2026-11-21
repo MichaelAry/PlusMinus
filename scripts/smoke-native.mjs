@@ -42,6 +42,12 @@ assert(code === 0 && data.ok && typeof data.metrics.opcode_hits === "object", "P
 assert(code === 0 && data.ok && data.trace.length > 0, "Trace missing events");
 ({data,code} = run("run", "x = 2;\n"));
 assert(code === 0 && data.ok && data.output === "", "Empty stdout was lost");
+({data,code} = run("run", "print(0);\n"));
+assert(code === 0 && data.ok && data.output.includes("0") && data.result === "0",
+  "Numeric zero return or output was lost");
+({data,code} = run("compile", "print(;\n"));
+assert(code === 1 && data.ok === false && data.error.length > 0 &&
+  data.diagnostics.length > 0, "Compiler errors must be a native result with exit 1");
 
 const native = spawnSync(locate("plusminus_native_tests"), ["--list"], {
   encoding: "utf8", timeout: 12_000, maxBuffer: 1024 * 1024,
