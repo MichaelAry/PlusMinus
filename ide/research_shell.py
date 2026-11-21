@@ -303,7 +303,7 @@ def build_research_shell(host, root):
                          Qt.DockWidgetArea.BottomDockWidgetArea)
 
     controller = ResearchController(host, explorer_dock, inspector_dock,
-                                     console_dock, controls, explorer_model)
+                                     console_dock, controls, explorer_tree)
     host.research_controller = controller
     explorer_tree.doubleClicked.connect(controller.open_path)
     for mode, tool in controls.items():

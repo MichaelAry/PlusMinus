@@ -17,7 +17,7 @@ app = QApplication([])
 window = Studio()
 window.show()
 app.processEvents()
-assert len(window.workspace.pages) == 8
+assert len(window.workspace.pages) == 9
 window.nav.setCurrentRow(2)
 window.nav.setCurrentRow(1)
 assert window.workspace.count() >= 3, 'Sidebar must retain multiple open pages'
@@ -47,6 +47,23 @@ assert [c['id'] for c in panel.filtered_cases()] == ['Math.fail']
 panel.status_filter.setCurrentText('NOT RUN')
 assert [c['id'] for c in panel.filtered_cases()] == ['Loop.other']
 panel.status_filter.setCurrentText('All statuses')
+assert window.research_controller.explorer is not None
+assert window.research_controller.inspector is not None
+assert window.research_controller.console is not None
+assert window.test_suites.count() == 3, 'Native C++ inspector tab must be present'
+window.research_controller.activate('Notebooks')
+assert window.nav.currentRow() == 8
+assert len(window.notebooks.cells) >= 1
+assert window.notebooks.snapshot()['nbformat'] == 4
+with tempfile.TemporaryDirectory() as folder:
+    document = Path(folder) / 'experiment.ipynb'
+    window.notebooks.path = document
+    window.notebooks.add_cell('markdown', '# Experiment')
+    assert window.notebooks.save_file()
+    assert document.is_file()
+    from notebook_format import load_notebook
+    assert len(load_notebook(document)['cells']) == 2
+window.nav.setCurrentRow(1)
 window.toggle_split_editor()
 assert window.split_pane.isVisible(), 'Split view must open'
 assert window.secondary_editor.document() is window.editor.document(), 'Split must share the live source document'

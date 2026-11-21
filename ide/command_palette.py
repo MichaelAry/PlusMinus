@@ -30,7 +30,7 @@ class CommandPalette(QDialog):
         query = self.search.text().strip().casefold()
         self.list.clear()
         for label, handler in self.commands:
-            if query and all(token not in label.casefold() for token in query.split()):
+            if query and any(token not in label.casefold() for token in query.split()):
                 continue
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, handler)
