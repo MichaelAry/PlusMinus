@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStudio } from "../../model/studio";
 import { bytecodeGraph, callGraph, type LanguageGraph } from "../../model/graphs";
+import { analyzeSource } from "../../model/sourceMetrics";
 
 export function GraphPanel(){
   const activeId=useStudio(s=>s.activeId);
@@ -10,6 +11,7 @@ export function GraphPanel(){
   const [mode,setMode]=useState<"bytecode"|"calls">("bytecode");
   const canvas=useRef<HTMLDivElement>(null);
   const [error,setError]=useState("");
+  const sourceMetrics=useMemo(()=>analyzeSource(source),[source]);
   const computed:LanguageGraph=useMemo(()=>mode==="bytecode"?bytecodeGraph(response?.report.bytecode??""):callGraph(source),
     [mode,response?.report.bytecode,source]);
   const [graph,setGraph]=useState(computed);
@@ -53,6 +55,18 @@ export function GraphPanel(){
     {graph.truncated&&<div className="lab-error">Graph truncated to first 200 bytecode instructions.</div>}
     {!graph.nodes.length?<p className="lab-muted">Compile or profile a PlusMinus program to display bytecode flow.</p>:null}
     <div ref={canvas} className="lab-graph" role="img" aria-label={mode==="bytecode"?"Bytecode control flow":"Function call graph"} />
+    <h3>Lexical source metrics</h3>
+    <div className="metrics-grid">
+      {([
+        ["Code lines",sourceMetrics.code_lines],["Functions",sourceMetrics.functions],
+        ["Variables",sourceMetrics.variables],["Branches",sourceMetrics.branches],
+        ["Loops",sourceMetrics.loops],["Max nesting",sourceMetrics.max_nesting],
+        ["Complexity estimate",sourceMetrics.complexity_estimate],["Comments",sourceMetrics.comments],
+      ] as Array<[string,number]>).map(([name,value])=>
+        <div className="metric" key={name}><small>{name}</small><strong>{value}</strong></div>)}
+    </div>
+    <p className="lab-muted">{sourceMetrics.method}</p>
+    {sourceMetrics.warnings.map(w=><div key={w} className="lab-error">{w}</div>)}
     <h3>Source / bytecode data</h3>
     <pre className="lab-mini-scroll">{mode==="bytecode"?(response?.report.bytecode||"No bytecode report yet."):source}</pre>
   </div>;

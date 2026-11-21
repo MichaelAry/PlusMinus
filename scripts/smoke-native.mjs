@@ -56,4 +56,19 @@ if (native.error) throw native.error;
 assert(native.status === 0, "Cannot list native tests");
 const tests = native.stdout.trim().split(/\r?\n/).map((s) => JSON.parse(s));
 assert(tests.length === 225 && tests.every((t) => t.type === "test"), "Expected 225 native tests");
-console.log("Native C++ runner smoke: run/compile/profile/trace/empty stdout and 225 test listing passed");
+// Stage 2: each native method must execute independently and return one JSONL
+// result with matching id, PASS/FAIL status and corresponding process exit.
+for (const test of tests.filter(t => !t.slow).slice(0, 3)) {
+  const one = spawnSync(locate("plusminus_native_tests"), ["--run", test.id], {
+    encoding: "utf8", timeout: 20_000, maxBuffer: 512 * 1024,
+  });
+  if (one.error) throw one.error;
+  const lines = one.stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert(lines.length === 1, "Isolated native test returned unexpected JSONL count: " + test.id);
+  const result = JSON.parse(lines[0]);
+  assert(result.type === "result" && result.id === test.id &&
+    ["PASS","FAIL"].includes(result.status), "Isolated test result invalid: " + test.id);
+  assert(one.status === (result.status === "PASS" ? 0 : 1),
+    "Process exit must match native result: " + test.id);
+}
+console.log("Native smoke: run/compile/profile/trace, compiler errors, 225 manifest IDs and isolated test protocol passed");
