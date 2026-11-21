@@ -55,7 +55,7 @@ function buildFingerprint() {
       files.length=0; visit(base);
       files.sort();
       for (const file of files) {
-        hash.update(path.relative(root,file),"utf8");
+        hash.update(path.relative(root,file).split(path.sep).join("/"),"utf8");
         hash.update(fs.readFileSync(file));
       }
     }
@@ -64,7 +64,7 @@ function buildFingerprint() {
     "Parser.h","tools/generate_native_tests.py"]) {
     const file=path.join(root,relative);
     if (fs.existsSync(file)) {
-      hash.update(relative.split("/").join(path.sep),"utf8");
+      hash.update(relative,"utf8");
       hash.update(fs.readFileSync(file));
     }
   }
