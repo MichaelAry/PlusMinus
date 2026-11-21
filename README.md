@@ -287,3 +287,33 @@ launch scripts and Qt data remain intact.
 
 See [Stage 3 acceptance, packaging and rollback](docs/migration/STAGE3_WINDOWS_LINUX.md)
 and [performance comparison matrix](docs/migration/PERFORMANCE_BASELINE.md).
+
+## Studio 5: one-click launch on Windows x64 / Linux x64
+
+Use the new **separate** Studio 5 launchers from a complete source checkout:
+- Windows: double-click [Start-PlusMinus-Studio5.cmd](Start-PlusMinus-Studio5.cmd).
+  It uses winget to install missing Node.js LTS/npm, Rust/Cargo (MSVC target),
+  CMake, Python3, Visual Studio C++ Build Tools and WebView2. UAC and a reboot
+  may be required for machine-wide packages.
+- Linux: run [Start-PlusMinus-Studio5.sh](Start-PlusMinus-Studio5.sh), or launch
+  the [desktop shortcut](Start-PlusMinus-Studio5.desktop) from the repository
+  (mark as trusted if requested). The supported package managers are apt
+  (Debian/Ubuntu), dnf (Fedora) and pacman (Arch). sudo prompts for a password.
+  Node.js 24 LTS is installed under the user home when needed after checking
+  the official SHA256 manifest; Rust is installed through official rustup.
+
+The launchers verify installed tools, build unchanged C++20 sidecars into a
+dedicated incremental CMake directory, stage the native binaries, install npm
+modules as needed, and run `npm run tauri dev`. This is the full application in
+**development mode**, NOT a signed production installer. A first-time setup
+needs Internet access, free disk space and permission to install system packages.
+
+To inspect requirements without installing or building, run:
+- Windows: `.\Start-PlusMinus-Studio5.cmd -Check`
+- Linux: `bash ./Start-PlusMinus-Studio5.sh --check`
+
+To prohibit installing packages, use `-NoInstall` (Windows) or
+`--no-install` (Linux). On errors the launcher stops and reports the cause.
+The original `Start-PlusMinus.cmd` and `Start-PlusMinus.sh` still launch Qt
+Studio 4, and original .pm/.ipynb files and studio.db are not modified
+by bootstrap. Windows/Linux x64 only.

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PlusMinus Studio 5 (Tauri)
+Comment=Install prerequisites, build and launch Studio 5
+Exec=sh -c "cd \"$(dirname \"$0\")\" && exec bash ./Start-PlusMinus-Studio5.sh" %k
+Terminal=true
+Icon=applications-development
+Categories=Development;IDE;
+StartupNotify=false

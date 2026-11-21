@@ -78,3 +78,14 @@ Clean file tabs can reopen after explicitly choosing the same workspace;
 unsaved source bytes are not persisted. Process-tree termination is
 best-effort (Linux groups, Windows taskkill) and has not been independently
 verified under adversarial descendants. See `docs/migration/STAGE3_WINDOWS_LINUX.md`.
+
+## One-click Studio 5 setup
+
+From the repository root, double-click `Start-PlusMinus-Studio5.cmd` on Windows,
+or execute `Start-PlusMinus-Studio5.sh` / trusted `Start-PlusMinus-Studio5.desktop`
+on Linux. The launcher installs missing prerequisites, builds/stages both
+original C++ binaries, prepares frontend modules and runs `npm run tauri dev`.
+Windows uses winget. Linux supports apt, dnf and pacman, with user-approved sudo.
+Check only: `-Check` on Windows, `--check` on Linux. Disable installation:
+`-NoInstall` / `--no-install`. Qt Studio 4 launchers remain unchanged.
+This runs a development build, not a production-certified installer.

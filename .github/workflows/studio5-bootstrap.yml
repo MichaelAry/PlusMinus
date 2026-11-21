@@ -1,0 +1,52 @@
+name: Studio 5 bootstrap smoke
+on:
+  pull_request:
+    paths:
+      - 'Start-PlusMinus-Studio5.*'
+      - 'scripts/bootstrap-studio5.ps1'
+      - '.github/workflows/studio5-bootstrap.yml'
+  push:
+    branches: ['master']
+    paths:
+      - 'Start-PlusMinus-Studio5.*'
+      - 'scripts/bootstrap-studio5.ps1'
+      - '.github/workflows/studio5-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux syntax, help and non-mutating check
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n Start-PlusMinus-Studio5.sh
+          bash Start-PlusMinus-Studio5.sh --help
+          set +e
+          bash Start-PlusMinus-Studio5.sh --check
+          status=$?
+          set -e
+          test "$status" -eq 0 -o "$status" -eq 2
+          if bash Start-PlusMinus-Studio5.sh --invalid; then exit 1; fi
+          test -z "$(git status --porcelain)"
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows PowerShell parser, CMD entrypoint and non-mutating check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-studio5.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell launcher help failed' }
+          & cmd.exe /c Start-PlusMinus-Studio5.cmd -Help
+          if ($LASTEXITCODE -ne 0) { throw 'CMD wrapper failed' }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-studio5.ps1 -Check
+          if ($LASTEXITCODE -notin @(0,2)) { throw "Windows check-only failed: $LASTEXITCODE" }
+          $changes = git status --porcelain
+          if ($changes) { throw "Check-only modified the checkout: $changes" }
