@@ -2,10 +2,13 @@ name: Studio 5 Tauri foundation (experimental)
 
 on:
   push:
-    branches: ['feature/studio5-*']
+    branches: ['master', 'feature/studio5-*']
     paths:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
+      - 'scripts/verify-native-isolation.mjs'
+      - 'scripts/check-qt-native-parity.py'
+      - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
       - 'src/**'
       - 'include/**'
@@ -16,6 +19,9 @@ on:
     paths:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
+      - 'scripts/verify-native-isolation.mjs'
+      - 'scripts/check-qt-native-parity.py'
+      - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
       - 'src/**'
       - 'include/**'
@@ -88,6 +94,9 @@ jobs:
 
       - name: Native C++ smoke and quick suite
         run: ctest --test-dir build/studio5 -C Release --output-on-failure
+
+      - name: Verify all 225 C++ tests in independent processes
+        run: node scripts/verify-native-isolation.mjs --build-dir build/studio5
 
       - name: Stage sidecars for Tauri
         run: node scripts/stage-native.mjs --build-dir build/studio5 --target ${{ matrix.triple }}
