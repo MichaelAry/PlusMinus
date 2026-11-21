@@ -4,12 +4,14 @@ on:
     paths:
       - 'Start-PlusMinus-Studio5.*'
       - 'scripts/bootstrap-studio5.ps1'
+      - 'scripts/tests/bootstrap-rustup-stderr.ps1'
       - '.github/workflows/studio5-bootstrap.yml'
   push:
     branches: ['master']
     paths:
       - 'Start-PlusMinus-Studio5.*'
       - 'scripts/bootstrap-studio5.ps1'
+      - 'scripts/tests/bootstrap-rustup-stderr.ps1'
       - '.github/workflows/studio5-bootstrap.yml'
   workflow_dispatch:
 
@@ -50,3 +52,8 @@ jobs:
           if ($LASTEXITCODE -notin @(0,2)) { throw "Windows check-only failed: $LASTEXITCODE" }
           $changes = git status --porcelain
           if ($changes) { throw "Check-only modified the checkout: $changes" }
+      - name: Regression for harmless rustup stderr and real failures in Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tests/bootstrap-rustup-stderr.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Rustup stderr regression test failed: $LASTEXITCODE" }
