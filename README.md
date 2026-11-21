@@ -128,3 +128,5 @@ For source-IDE launches, `launch.py` continues to configure `ide/build` with `cm
 ## Multi-tab workspace
 
 Every left navigation item opens a separate workspace tab without replacing previous pages. Tabs are movable and individually closable; the open workspace pages are restored on the next launch.
+
+The Code Editor also supports independent document tabs for multiple `.pm` files, with their own undo history, modification indicators, save prompts, de-duplicated opening and restored open paths. Loading test source opens a new tab rather than overwriting active source.

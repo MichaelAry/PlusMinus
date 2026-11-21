@@ -22,6 +22,10 @@ window.nav.setCurrentRow(2)
 window.nav.setCurrentRow(1)
 assert window.workspace.count() >= 3, 'Sidebar must retain multiple open pages'
 assert window.editor.toPlainText()
+window.new_file()
+assert window.documents.count() >= 2
+window.documents.setCurrentIndex(0)
+assert window.editor.toPlainText()
 window.open_language_internals('print')
 app.processEvents()
 assert window.language_window is not None
