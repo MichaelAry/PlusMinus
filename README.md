@@ -246,3 +246,35 @@ invalidate the affected native binaries until a successful rebuild. Pressing
 Save on an unchanged C++ file no longer needlessly invalidates the VM. Native
 Test Lab Refresh will not silently rediscover an obsolete test executable
 while source changes await rebuilding.
+
+
+## Windows GUI startup crash (0xC0000005)
+
+If the launcher reports exit code **3221225477** (Windows access violation),
+the C++ interpreter executable may be fine: the crash can occur when Qt shows
+its main window. Standard CI's offscreen GUI tests do **not** reproduce every
+graphics driver / shell extension / DPI / stale layout problem.
+
+* The launcher now records faulthandler stacks and startup phases to
+  `%USERPROFILE%\\.plusminus\\studio-startup.log` on Windows.
+* After exactly one Windows access violation, it **automatically retries once
+  in safe mode**. Safe mode disables saved geometry/dock restoration,
+  native filesystem watchers and custom directory icons, automatic startup
+  tests and telemetry polling, and requests software rendering. It does
+  not delete or overwrite existing settings, notebooks, or SQLite history.
+* To launch safe mode directly from PowerShell:
+  `./Start-PlusMinus.cmd --safe-mode`.
+* To distinguish Qt platform problems from Studio widgets:
+  `.\\.venv\\Scripts\\python.exe -X faulthandler .\\ide\\studio_qt.py --qt-probe`.
+  The probe opens a minimal widget briefly and exits.
+* To test the Studio widgets without startup workers:
+  `.\\.venv\\Scripts\\python.exe -X faulthandler .\\ide\\studio_qt.py --safe-mode --gui-smoke`.
+* The final line in the startup log identifies the last completed phase.
+  If `main: calling window.show()` is present but
+  `main: window.show() returned` is absent, the failure is in native
+  window display/polishing. This alone does **not** identify its root cause.
+
+If the minimal Qt probe also crashes, capture the Windows Event Viewer
+Application Error entry (faulting module and exception code), and record
+Python / PySide6 / Qt versions before changing dependencies. Never delete
+`%USERPROFILE%\\.plusminus` merely to troubleshoot a startup failure.

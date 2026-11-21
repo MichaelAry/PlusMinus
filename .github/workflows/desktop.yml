@@ -63,6 +63,7 @@ jobs:
           .venv/bin/python -m pip install -r ide/requirements.txt pyinstaller==6.16.0
           QT_QPA_PLATFORM=offscreen .venv/bin/python ide/studio_qt.py --self-test
           QT_QPA_PLATFORM=offscreen .venv/bin/python tools/smoke_qt.py
+          QT_QPA_PLATFORM=offscreen .venv/bin/python ide/studio_qt.py --safe-mode --gui-smoke
           QT_QPA_PLATFORM=offscreen .venv/bin/python -c 'from PySide6.QtWidgets import QApplication; app=QApplication([]); print("Qt OK")'
 
       - name: C++ CTest (Windows/macOS)
@@ -92,6 +93,21 @@ jobs:
         if: runner.os != 'Linux'
         timeout-minutes: 5
         run: python -u tools/smoke_qt.py
+
+      # Prior Qt tests forced the offscreen platform on ALL operating systems.
+      # A native Windows access violation in QWidget.show() was therefore not
+      # covered. Exercise the real Windows platform plugin before packaging.
+      - name: Native Windows window startup (display/Qt safe mode)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+          PLUSMINUS_DIAGNOSTICS: "1"
+        run: |
+          python -u ide/studio_qt.py --qt-probe
+          python -u ide/studio_qt.py --safe-mode --gui-smoke
+          python -u ide/studio_qt.py --gui-smoke
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
