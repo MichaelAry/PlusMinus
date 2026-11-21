@@ -17,14 +17,14 @@ import threading
 from collections import Counter
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, QSettings, Signal, QPointF, QRectF
+from PySide6.QtCore import Qt, QThread, QTimer, QSettings, Signal, QPointF, QRectF, QStringListModel
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QAction
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QPlainTextEdit, QSplitter, QTableWidget, QTableWidgetItem,
     QHeaderView, QStackedWidget, QListWidget, QListWidgetItem, QTabWidget,
     QFileDialog, QMessageBox, QSpinBox, QProgressBar, QInputDialog, QComboBox,
-    QTextEdit, QAbstractItemView, QCheckBox,
+    QTextEdit, QAbstractItemView, QCheckBox, QCompleter,
 )
 
 from analytics import (BUILTIN_TESTS, HistoryStore, analyze_bytecode, analyze_source,
@@ -236,6 +236,14 @@ class CodeEditor(QPlainTextEdit):
         self.updateRequest.connect(self.update_gutter)
         self.update_gutter_width(0)
         self._diagnostic_lines = set()
+        self.language = 'pm'
+        self.completion_model = QStringListModel(self)
+        self.completer = QCompleter(self.completion_model, self)
+        self.completer.setWidget(self)
+        self.completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.completer.activated.connect(self.insert_completion)
+        self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(' '))
 
     def set_diagnostics(self, issues):
         markers = []
@@ -262,12 +270,98 @@ class CodeEditor(QPlainTextEdit):
         self.setExtraSelections(markers)
         self.gutter.update()
 
+    def completion_words(self):
+        builtin = ('if', 'else', 'while', 'func', 'proc', 'return', 'go', 'sync',
+                   'lock', 'unlock', 'int', 'float', 'double', 'print',
+                   'len', 'resize', 'sin', 'cos', 'pow', 'fact', 'multifact')
+        cpp = ('class','struct','namespace','include','std','vector','string',
+               'auto','const','constexpr','void','bool','return','for','while',
+               'if','else','switch','case','try','catch')
+        detected = re.findall(r'\b[A-Za-z_][A-Za-z_0-9]*\b', self.toPlainText())
+        return sorted(set((cpp if self.language == 'cpp' else builtin) + tuple(detected)))
+
+    def show_completions(self):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        prefix = cursor.selectedText()
+        self.completion_model.setStringList(self.completion_words())
+        self.completer.setCompletionPrefix(prefix)
+        popup = self.completer.popup()
+        if not popup:
+            return
+        popup.setCurrentIndex(self.completer.completionModel().index(0,0))
+        rect = self.cursorRect()
+        rect.setWidth(max(260,popup.sizeHintForColumn(0)+25))
+        self.completer.complete(rect)
+
+    def insert_completion(self, word):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.SelectionType.WordUnderCursor)
+        cursor.insertText(str(word))
+        self.setTextCursor(cursor)
+
+    def toggle_comment(self):
+        cursor = self.textCursor()
+        start = min(cursor.selectionStart(),cursor.selectionEnd())
+        end = max(cursor.selectionStart(),cursor.selectionEnd())
+        first = self.document().findBlock(start)
+        last = self.document().findBlock(max(start,end-1))
+        blocks = []
+        current = first
+        while current.isValid():
+            blocks.append(current)
+            if current == last:
+                break
+            current = current.next()
+        uncomment = all(b.text().lstrip().startswith('//') for b in blocks if b.text().strip())
+        cursor.beginEditBlock()
+        for block in reversed(blocks):
+            leading = len(block.text())-len(block.text().lstrip())
+            cursor.setPosition(block.position()+leading)
+            if uncomment and block.text().lstrip().startswith('//'):
+                cursor.movePosition(QTextCursor.MoveOperation.Right,
+                                    QTextCursor.MoveMode.KeepAnchor,2)
+                cursor.removeSelectedText()
+            elif not uncomment:
+                cursor.insertText('// ')
+        cursor.endEditBlock()
+
+    def keyPressEvent(self, event):
+        if self.completer.popup() and self.completer.popup().isVisible() and event.key() in (
+                Qt.Key.Key_Return,Qt.Key.Key_Enter,Qt.Key.Key_Escape,Qt.Key.Key_Tab):
+            event.ignore()
+            return
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Space:
+                self.show_completions()
+                return
+            if event.key() == Qt.Key.Key_Slash:
+                self.toggle_comment()
+                return
+        if event.key() in (Qt.Key.Key_Return,Qt.Key.Key_Enter):
+            cursor = self.textCursor()
+            prefix = cursor.block().text()[:cursor.positionInBlock()]
+            indent = re.match(r'^\s*',prefix).group()
+            if prefix.rstrip().endswith('{'):
+                indent += '    '
+            super().keyPressEvent(event)
+            self.insertPlainText(indent)
+            return
+        if event.text() in ('(', '[', '{', '"') and not self.textCursor().hasSelection():
+            partner = {'(' : ')', '[' : ']', '{' : '}', '"' : '"'}[event.text()]
+            cursor = self.textCursor()
+            cursor.insertText(event.text()+partner)
+            cursor.movePosition(QTextCursor.MoveOperation.Left)
+            self.setTextCursor(cursor)
+            return
+        super().keyPressEvent(event)
+
     def mousePressEvent(self, event):
         if (event.button() == Qt.MouseButton.LeftButton and
                 event.modifiers() & Qt.KeyboardModifier.ControlModifier):
             cursor = self.cursorForPosition(event.position().toPoint())
             keyword = keyword_at(self.toPlainText(), cursor.position())
-            if keyword:
+            if keyword and self.language == 'pm':
                 self.definitionRequested.emit(keyword)
                 event.accept()
                 return
@@ -388,7 +482,7 @@ class Studio(QMainWindow):
         self.process = psutil.Process(os.getpid()) if psutil else None
         if self.process:
             self.process.cpu_percent(None)
-        self.setWindowTitle('PlusMinus Studio 2.0 — Analytics IDE')
+        self.setWindowTitle('PlusMinus Studio 3.0 — Development & Test Laboratory')
         self.resize(1440, 885)
         self.setMinimumSize(1010, 680)
         self.setStyleSheet(STYLE)
@@ -428,7 +522,7 @@ class Studio(QMainWindow):
         title = label('＋／－  PLUSMINUS')
         title.setStyleSheet('font-size: 12pt; font-weight: 800; padding: 0 9px;')
         rail_layout.addWidget(title)
-        sub = label('STUDIO 2.0  /  ANALYTICS', style='muted')
+        sub = label('STUDIO 3.0  /  DEVELOPMENT', style='muted')
         sub.setStyleSheet('color: #7f8ca0; font-size: 8pt; padding-left: 9px;')
         rail_layout.addWidget(sub)
         self.nav = QListWidget()
@@ -472,7 +566,8 @@ class Studio(QMainWindow):
         for shortcut, action in [('F5', lambda: self.launch('run')),
                                  ('F6', lambda: self.launch('run', profile=True)),
                                  ('Ctrl+S', self.save_file), ('Ctrl+O', self.open_file),
-                                 ('Ctrl+N', self.new_file),
+                                 ('Ctrl+N', self.new_file), ('Ctrl+F', self.find_in_file),
+                                  ('Ctrl+G', self.go_to_line),
                                  ('Ctrl+Shift+I', self.open_language_internals)]:
             a = QAction(self)
             a.setShortcut(shortcut)
@@ -523,6 +618,8 @@ class Studio(QMainWindow):
         toolbar.addWidget(self.file_label)
         toolbar.addStretch()
         toolbar.addWidget(button('New', self.new_file))
+        toolbar.addWidget(button('Find  Ctrl+F', self.find_in_file))
+        toolbar.addWidget(button('Go to line', self.go_to_line))
         toolbar.addWidget(button('Compile', lambda: self.launch('compile')))
         toolbar.addWidget(button('Run', lambda: self.launch('run'), primary=True))
         toolbar.addWidget(button('Language Internals  Ctrl+click', self.open_language_internals))
@@ -543,6 +640,11 @@ class Studio(QMainWindow):
         ins.addWidget(label('CODE INSIGHTS'))
         self.code_stats = label('Pending analysis')
         ins.addWidget(self.code_stats)
+        ins.addWidget(label('SYMBOL OUTLINE',style='muted'))
+        self.symbol_outline = QListWidget()
+        self.symbol_outline.setMaximumHeight(125)
+        self.symbol_outline.itemDoubleClicked.connect(self.open_outline_symbol)
+        ins.addWidget(self.symbol_outline)
         ins.addWidget(label('HEURISTIC DIAGNOSTICS',style='muted'))
         self.code_warnings = QPlainTextEdit()
         self.code_warnings.setReadOnly(True)
@@ -802,6 +904,7 @@ class Studio(QMainWindow):
         is_cpp = bool(doc.path and doc.path.suffix.lower() in ('.cpp','.h','.hpp'))
         current_kind = getattr(doc.editor, '_syntax_kind', 'pm')
         expected_kind = 'cpp' if is_cpp else 'pm'
+        doc.editor.language = expected_kind
         if current_kind != expected_kind:
             doc.editor._highlighter.setDocument(None)
             doc.editor._highlighter = CppHighlighter(doc.editor.document()) if is_cpp else Syntax(doc.editor.document())
@@ -868,6 +971,42 @@ class Studio(QMainWindow):
             self.statusBar().showMessage(
                 f'{len(issues)} diagnostics' if issues else 'Syntax check passed', 2500)
 
+    def go_to_line(self):
+        line, ok = QInputDialog.getInt(
+            self, 'Go to line', 'Line number', 1, 1,
+            max(1,self.editor.blockCount()))
+        if ok:
+            block = self.editor.document().findBlockByNumber(line-1)
+            if block.isValid():
+                cursor = self.editor.textCursor()
+                cursor.setPosition(block.position())
+                self.editor.setTextCursor(cursor)
+                self.editor.centerCursor()
+                self.nav.setCurrentRow(1)
+
+    def find_in_file(self):
+        needle, ok = QInputDialog.getText(self, 'Find in file', 'Text')
+        if ok and needle:
+            if not self.editor.find(needle):
+                cursor = self.editor.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                self.editor.setTextCursor(cursor)
+                if not self.editor.find(needle):
+                    self.statusBar().showMessage(f'Not found: {needle}',4000)
+            self.nav.setCurrentRow(1)
+            self.editor.setFocus()
+
+    def open_outline_symbol(self, item):
+        name = item.data(Qt.ItemDataRole.UserRole)
+        match = re.search(r'\b(?:func|proc)\s+'+re.escape(name)+r'\b',
+                          self.editor.toPlainText())
+        if match:
+            cursor = self.editor.textCursor()
+            cursor.setPosition(match.start())
+            self.editor.setTextCursor(cursor)
+            self.editor.centerCursor()
+            self.editor.setFocus()
+
     def update_cursor(self):
         cursor = self.editor.textCursor()
         self.cursor_label.setText(f'Line {cursor.blockNumber()+1}  ·  Column {cursor.positionInBlock()+1}')
@@ -883,6 +1022,11 @@ class Studio(QMainWindow):
             f"Max block nesting         {metrics['max_nesting']}",
             f"Concurrent calls          {metrics['go_calls']}",
         ]))
+        self.symbol_outline.clear()
+        for name in metrics['function_names']:
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole,name)
+            self.symbol_outline.addItem(item)
         self.code_warnings.setPlainText('\n'.join(metrics['warnings']) if metrics['warnings']
                                         else 'No lexical warnings. Static analysis is heuristic, not a proof of correctness.')
         doc = self.documents.current_document()
