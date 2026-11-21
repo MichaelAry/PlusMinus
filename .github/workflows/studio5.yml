@@ -128,9 +128,39 @@ jobs:
         working-directory: apps/studio/src-tauri
         run: cargo test
 
-      - name: Tauri package
+      - name: Tauri package (Windows and Linux)
+        if: runner.os != 'macOS'
         working-directory: apps/studio
         run: npm run tauri build
+
+      - name: Tauri package (macOS with bounded DMG eject retry)
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: apps/studio
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            log="$RUNNER_TEMP/tauri-package-${attempt}.log"
+            echo "macOS Tauri package attempt ${attempt}/3"
+            if npm run tauri build 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            # macOS CI sometimes refuses to eject the temporary RW dmg
+            # (hdiutil: Resource busy), after the application has compiled.
+            # Retry only that known transient packaging error; do not mask
+            # Rust/compiler, configuration or missing-sidecar failures.
+            if ! grep -qiE "(hdiutil:.*Resource busy|couldn't eject.*Resource busy)" "$log"; then
+              echo "Non-transient Tauri packaging failure" >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "macOS DMG eject remained busy after three attempts" >&2
+              exit 1
+            fi
+            hdiutil info || true
+            sync
+            sleep $((15 * attempt))
+          done
 
       - name: Smoke installed-layout Linux sidecars and GUI startup
         if: runner.os == 'Linux'
