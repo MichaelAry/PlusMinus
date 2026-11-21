@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{path::PathBuf, process::Stdio, time::{Duration, Instant}};
 use tauri::{AppHandle, Manager};
+use crate::StudioState;
 use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWriteExt}, process::Command};
 use tokio_util::sync::CancellationToken;
 
@@ -58,6 +59,8 @@ pub fn resolve_native(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
         return Err("Unknown native binary".into());
     }
     let mut roots = Vec::new();
+    if let Some(folder) = app.state::<StudioState>().rebuilt_native.lock()
+        .map_err(|e|e.to_string())?.clone() { roots.push(folder); }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() { roots.push(parent.to_path_buf()); }
     }
