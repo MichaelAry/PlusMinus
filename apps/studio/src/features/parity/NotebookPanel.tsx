@@ -49,8 +49,11 @@ export function NotebookPanel(){
   const [message,setMessage]=useState("");
   const [visibleCount,setVisibleCount]=useState(40);
   const openRef=useRef<(path:string)=>Promise<void>>(async()=>{});
+  const openGeneration=useRef(0);
   const saveRef=useRef<()=>Promise<void>>(async()=>{});
   const open=async(p:string)=>{
+    const requestId=++openGeneration.current;
+    const root=workspace;
     if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
     const discardPrevious=Boolean(dirty&&workspace&&path);
     const cached=workspace?recoverNotebookDraft(workspace,p):null;
@@ -62,11 +65,15 @@ export function NotebookPanel(){
     }
     try {
       const doc=await parity.openDocument(p);
+      if(openGeneration.current!==requestId || root!==useStudio.getState().workspace)return;
       const parsed=validateNotebook(JSON.parse(doc.source.replace(/^\uFEFF/,"")));
       if(discardPrevious&&workspace)discardNotebookDraft(workspace,path);
       setPath(p);setNotebook(parsed);current.current=parsed;
       setDigest(doc.digest);setDirty(false);setStale({});setSelected(0);setError("");setMessage("Opened "+p);
-    }catch(e){setError(String(e));}
+    }catch(e){
+      if(openGeneration.current===requestId && root===useStudio.getState().workspace)
+        setError(String(e));
+    }
   };
   openRef.current=open;
   useEffect(() => {
@@ -191,7 +198,9 @@ export function NotebookPanel(){
         setStale(s=>({...s,[cell.id]:changedDuringExecution}));
         if(next){setSelected(Math.min(actualIndex+1,updated.cells.length-1));setVisibleCount(v=>Math.max(v,actualIndex+2));}
       }
-      setMessage(report.report.ok?"Cell executed in isolated process":"Native execution returned error");
+      setMessage(report.history_error?"Cell executed, but history persistence failed":
+        report.report.ok?"Cell executed in isolated process":"Native execution returned error");
+      if(report.history_error)setError("History was not saved: "+report.history_error);
       return report.report.ok;
     }catch(e){setError(String(e));return false;}
     finally{activeJob.current=null;setRunning(null);}
