@@ -36,6 +36,9 @@
     "externalBin": [
       "binaries/plusminus_runner",
       "binaries/plusminus_native_tests"
+    ],
+    "resources": [
+      "binaries/source-fingerprint.json"
     ]
   }
 }
