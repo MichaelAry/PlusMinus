@@ -42,7 +42,8 @@ function Install-Winget([string]$id, [string[]]$extra = @()) {
 function Test-Node {
   if (-not (Has 'node.exe') -or -not (Has 'npm.cmd')) { return $false }
   $version = & node.exe --version 2>$null
-  return [bool]($version -match '^v([0-9]+)\.' -and [int]$Matches[1] -ge 22)
+  if ($version -match '^v([0-9]+)\.') { return ([int]$Matches[1] -ge 22) }
+  return $false
 }
 
 function Get-Python {
@@ -105,7 +106,7 @@ function Missing {
   if (-not (Get-Msvc)) { $issues += 'MSVC x64 / Visual Studio Build Tools' }
   if (-not (Test-WebView2)) { $issues += 'Edge WebView2 Runtime' }
   if (-not (Test-Rust)) { $issues += 'Rust stable x86_64-pc-windows-msvc / Cargo' }
-  return ,$issues
+  return $issues
 }
 
 if ($Help) {
