@@ -17,6 +17,13 @@ class LauncherTests(unittest.TestCase):
              patch.object(launch, 'has_compiler', return_value=False):
             self.assertEqual(launch.missing_dependencies(), ['cmake', 'cxx'])
 
+    def test_launcher_tracks_modular_sources(self):
+        all_cpp = tuple((launch.ROOT / 'src').rglob('*.cpp'))
+        all_headers = tuple((launch.ROOT / 'include').rglob('*.hpp'))
+        self.assertGreater(len(all_cpp), 5)
+        self.assertTrue(all(path in launch.SOURCES for path in all_cpp + all_headers))
+        self.assertIn(launch.ROOT / 'CMakeLists.txt', launch.SOURCES)
+
     def test_existing_runner_reused(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)

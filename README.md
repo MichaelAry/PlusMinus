@@ -90,8 +90,8 @@ user programs are not executed automatically. The GUI uses no cloud service.
 Hold **Ctrl** and click a PlusMinus keyword or built-in function in the code
 editor (for example `if`, `while`, `go`, `print`, `pow`, or `len`).
 The separate **Language Internals** window opens the real implementation in
-`Parser.cpp` and lets you switch between compiler and runtime
-sections. It also provides the core types/opcodes from `Parser.h`
+the files under `src/compiler/` and `src/vm/`, allowing compiler/runtime selection
+sections. It also provides core types/opcodes from `include/plusminus/bytecode.hpp`
 and the JSON runner adapter in `ide/runner.cpp`.
 
 You can edit the actual C++ implementation and press **Ctrl+S**. Studio saves
@@ -113,11 +113,13 @@ take effect after saving and successfully rebuilding.
 The C++20 interpreter now lives in `include/plusminus/` and `src/` and is built as a single static `plusminus_core` library. `Parser.h` remains as a compatibility header; `Parser.cpp` is removed. The runner is a separate executable linking the same library.
 
 ```sh
-cmake -S . -B ide/build -DCMAKE_BUILD_TYPE=Release
-cmake --build ide/build --config Release
-ctest --test-dir ide/build -C Release --output-on-failure
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 The source launcher keeps the original double-click workflow. `Ctrl+click` in Studio 2.0 navigates to the compiler, VM and bytecode source files at their new locations. The Visual Studio native unit tests are grouped under `tests/cpp/` while retaining their original `TEST_CLASS` and `TEST_METHOD` definitions.
 
 The built-in function implementations (`print`, `len`, `resize`, `sin`, `cos`, `pow`, `fact`, `multifact`) reside in `src/vm/builtins.cpp` and can be opened directly from Language Internals. User-defined function dispatch remains in `src/vm/executor.cpp`.
+
+For source-IDE launches, `launch.py` continues to configure `ide/build` with `cmake -S ide` to preserve existing CMake caches from previous versions. `ide/CMakeLists.txt` is now a compatibility wrapper around the root build; you can also configure the root CMake project separately in `build/` as shown above.

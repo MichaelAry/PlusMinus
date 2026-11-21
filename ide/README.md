@@ -23,6 +23,6 @@ For standalone bundling, use `python tools/package.py` after installing PyInstal
 
 Hold Ctrl and click a keyword or built-in name in the editor to open the
 editable source and description in Language Internals. Use Ctrl+Shift+I
-to browse all keywords, Parser.h, and the runner adapter. Save with Ctrl+S;
+to browse all keywords, the modular C++ headers, and the runner adapter. Save with Ctrl+S;
 a successful background C++ rebuild triggers the built-in regression suite.
 Source editing is disabled in packaged binaries without C++ source files.
