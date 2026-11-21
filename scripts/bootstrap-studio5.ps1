@@ -61,8 +61,9 @@ function Refresh-Path {
   $cargo = Join-Path $HOME '.cargo\bin'
   # Keep caller PATH first (for portable tools and CI stub binaries), then
   # add any newly installed user/machine paths. Do not lose the VS dev shell.
-  $env:Path = (@($env:Path, $cargo, $user, $machine) |
-    Where-Object { $_ }) -join ';'
+  $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $env:Path = ((@($env:Path, $cargo, $user, $machine) -join ';') -split ';' |
+    Where-Object { $_ -and $seen.Add($_) }) -join ';'
 }
 
 function Native([string]$tool, [string[]]$arguments) {
@@ -274,7 +275,11 @@ try {
   $stamp = Join-Path $app 'node_modules\.plusminus-studio5-deps'
   $nodeModules = Join-Path $app 'node_modules'
   $tauriCmd = Join-Path $nodeModules '.bin\tauri.cmd'
-  $hash = (Get-FileHash (Join-Path $app 'package.json') -Algorithm SHA256).Hash
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $manifest = [System.IO.File]::ReadAllBytes((Join-Path $app 'package.json'))
+    $hash = [BitConverter]::ToString($sha256.ComputeHash($manifest)).Replace('-', '')
+  } finally { $sha256.Dispose() }
   $oldHash = if (Test-Path $stamp) { (Get-Content $stamp -Raw).Trim() } else { '' }
   if (-not (Test-Path $nodeModules) -or -not (Test-Path $tauriCmd) -or $oldHash -ne $hash) {
     Log 'Installing frontend dependencies with npm.'
