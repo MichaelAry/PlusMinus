@@ -194,7 +194,7 @@ pub fn recent_runs(limit: i64) -> Result<Value, String> {
 /// Escape CSV for spreadsheet viewers; prefix Excel formula-like values with
 /// an apostrophe, while preserving exact original data in SQLite and JSON.
 fn csv_cell(value: &str) -> String {
-    let safe = if value.starts_with(['=','+','-','@','\t','\r']) {
+    let safe = if value.chars().next().is_some_and(|ch|matches!(ch,'='|'+'|'-'|'@'|'\t'|'\r')) {
         format!("'{}",value)
     } else {
         value.to_owned()
