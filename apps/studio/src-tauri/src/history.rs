@@ -28,6 +28,9 @@ fn path_v5() -> Result<PathBuf, String> {
 }
 
 fn count_table(db: &Connection, name: &str) -> Result<i64, String> {
+    if !["runs","native_sessions","native_results","native_baseline"].contains(&name) {
+        return Err("Unknown table".into());
+    }
     let count: i64 = db.query_row(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
         [name], |r| r.get(0)).map_err(|e| e.to_string())?;

@@ -179,13 +179,15 @@ pub async fn start_native_suite(app:AppHandle,state:State<'_,StudioState>,
         if jobs.contains_key(&job_id){return Err("Duplicate job ID".into());}
         jobs.insert(job_id.clone(),token.clone());
     }
-    let state_copy=app.state::<StudioState>();
-    let id_copy=job_id.clone();
+    let cleanup_app=app.clone();
+    let cleanup_id=job_id.clone();
+    let return_id=job_id.clone();
     tokio::spawn(async move {
         run_suite(app,job_id,cases,label,on_event,token,root).await;
-        if let Ok(mut jobs)=state_copy.active_jobs.lock(){jobs.remove(&id_copy);}
+        let state_copy=cleanup_app.state::<StudioState>();
+        if let Ok(mut jobs)=state_copy.active_jobs.lock(){jobs.remove(&cleanup_id);}
     });
-    Ok(id_copy)
+    Ok(return_id)
 }
 
 #[cfg(test)]
