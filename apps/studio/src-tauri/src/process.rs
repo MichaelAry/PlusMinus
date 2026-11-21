@@ -1,0 +1,206 @@
+//! Adapter for the UNMODIFIED one-shot PlusMinus C++ runner.
+//! The executable accepts exactly one mode argv, UTF-8 source until stdin EOF,
+//! and returns exactly one JSON object. This is NOT a JSON-RPC or DAP server.
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{path::PathBuf, process::Stdio, time::{Duration, Instant}};
+use tauri::{AppHandle, Manager};
+use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWriteExt}, process::Command};
+use tokio_util::sync::CancellationToken;
+
+const MAX_SOURCE_BYTES: usize = 1024 * 1024;
+const MAX_STDOUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_STDERR_BYTES: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunMode { Run, Compile, Profile, Trace }
+impl RunMode {
+    fn argv(self) -> &'static str {
+        match self { Self::Run => "run", Self::Compile => "compile", Self::Profile => "profile", Self::Trace => "trace" }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunRequest {
+    pub job_id: String,
+    pub source: String,
+    pub mode: RunMode,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RunResponse {
+    pub job_id: String,
+    pub report: Value,
+    pub exit_code: Option<i32>,
+    pub wall_ms: f64,
+}
+
+pub fn validate_request(request: &RunRequest) -> Result<(), String> {
+    if request.job_id.len() < 8 || request.job_id.len() > 80 ||
+        !request.job_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err("Invalid job_id".into());
+    }
+    if request.source.len() > MAX_SOURCE_BYTES { return Err("Source exceeds 1 MiB".into()); }
+    if !(100..=300_000).contains(&request.timeout_ms) { return Err("Timeout must be 100..300000 ms".into()); }
+    Ok(())
+}
+
+fn candidate_names(name: &str) -> [String; 2] {
+    [format!("{name}{}", std::env::consts::EXE_SUFFIX), format!("binaries/{name}{}", std::env::consts::EXE_SUFFIX)]
+}
+
+/// No caller-supplied executable paths. Use only installed sidecars or known
+/// developer CMake outputs; canonical paths must remain under a trusted root.
+pub fn resolve_native(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    if name != "plusminus_runner" && name != "plusminus_native_tests" {
+        return Err("Unknown native binary".into());
+    }
+    let mut roots = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() { roots.push(parent.to_path_buf()); }
+    }
+    if let Ok(resources) = app.path().resource_dir() { roots.push(resources); }
+    #[cfg(debug_assertions)]
+    {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors().nth(3).ok_or("Cannot find development checkout")?;
+        roots.extend([
+            repo.join("build/studio5"), repo.join("build/studio5/Release"),
+            repo.join("build"), repo.join("build/Release"),
+            repo.join("ide/build"), repo.join("ide/build/Release"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries"),
+        ]);
+    }
+    for root in roots {
+        let Ok(trusted_root) = root.canonicalize() else { continue; };
+        for candidate in candidate_names(name) {
+            let path = trusted_root.join(&candidate);
+            let Ok(canonical) = path.canonicalize() else { continue; };
+            if canonical.starts_with(&trusted_root) && canonical.is_file() { return Ok(canonical); }
+        }
+    }
+    Err(format!("{name} not found; build C++ and stage native sidecars first"))
+}
+
+async fn read_capped<R: AsyncRead + Unpin>(mut stream: R, max: usize) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let amount = stream.read(&mut chunk).await.map_err(|e| e.to_string())?;
+        if amount == 0 { return Ok(bytes); }
+        if bytes.len().saturating_add(amount) > max {
+            return Err(format!("Native output exceeds {max} bytes"));
+        }
+        bytes.extend_from_slice(&chunk[..amount]);
+    }
+}
+
+pub fn decode_report(stdout: &[u8], exit_code: Option<i32>) -> Result<Value, String> {
+    let value: Value = serde_json::from_slice(stdout)
+        .map_err(|e| format!("Invalid C++ JSON response: {e}"))?;
+    let object = value.as_object().ok_or("Runner response is not a JSON object")?;
+    if !object.get("ok").is_some_and(Value::is_boolean) {
+        return Err("Runner response missing boolean ok".into());
+    }
+    for field in ["output", "result", "variables", "bytecode", "error"] {
+        if !object.get(field).is_some_and(Value::is_string) {
+            return Err(format!("Runner response missing string {field}"));
+        }
+    }
+    if !object.get("diagnostics").is_some_and(Value::is_array) ||
+       !object.get("trace").is_some_and(Value::is_array) ||
+       !object.get("metrics").is_some_and(Value::is_object) {
+        return Err("Runner response has invalid diagnostics, trace or metrics".into());
+    }
+    // Compile errors return ok=false AND exit 1: preserve the legitimate report.
+    // Exit 0 with ok=false or exit nonzero with ok=true is a protocol mismatch.
+    if (exit_code == Some(0)) != (value["ok"] == true) {
+        return Err(format!("Runner response/exit mismatch: {exit_code:?}"));
+    }
+    Ok(value)
+}
+
+pub async fn execute(
+    app: &AppHandle,
+    request: RunRequest,
+    cancel: CancellationToken,
+) -> Result<RunResponse, String> {
+    validate_request(&request)?;
+    let executable = resolve_native(app, "plusminus_runner")?;
+    let start = Instant::now();
+    let mut child = Command::new(executable)
+        .arg(request.mode.argv())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn().map_err(|e| format!("Runner spawn failed: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("Runner stdin unavailable")?;
+    let stdout = child.stdout.take().ok_or("Runner stdout unavailable")?;
+    let stderr = child.stderr.take().ok_or("Runner stderr unavailable")?;
+
+    let execution = async {
+        stdin.write_all(request.source.as_bytes()).await
+            .map_err(|e| format!("Runner stdin failed: {e}"))?;
+        drop(stdin); // Mandatory EOF: C++ reads istreambuf_iterator until EOF.
+        tokio::try_join!(
+            async { child.wait().await.map_err(|e| e.to_string()) },
+            read_capped(stdout, MAX_STDOUT_BYTES),
+            read_capped(stderr, MAX_STDERR_BYTES)
+        )
+    };
+
+    let outcome = tokio::select! {
+        _ = cancel.cancelled() => Err("Canceled by user".to_string()),
+        result = tokio::time::timeout(Duration::from_millis(request.timeout_ms), execution) => {
+            result.map_err(|_| "Runner timed out".to_string()).and_then(|r| r)
+        }
+    };
+    if outcome.is_err() {
+        let _ = child.start_kill();
+        let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    }
+    let (status, stdout, stderr) = outcome?;
+    let report = decode_report(&stdout, status.code())?;
+    if !stderr.is_empty() {
+        // Stderr is preserved as transport information, never silently discarded.
+        let message = String::from_utf8_lossy(&stderr);
+        if report["ok"] == true {
+            return Err(format!("Runner emitted stderr: {message}"));
+        }
+    }
+    Ok(RunResponse {
+        job_id: request.job_id,
+        report,
+        exit_code: status.code(),
+        wall_ms: start.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const EMPTY: &str = r#"{"ok":true,"output":"","result":"0","variables":"","bytecode":"","error":"","diagnostics":[],"trace":[],"metrics":{}}"#;
+    #[test]
+    fn empty_stdout_and_zero_result_are_not_lost() {
+        let result = decode_report(EMPTY.as_bytes(), Some(0)).unwrap();
+        assert_eq!(result["output"], "");
+        assert_eq!(result["result"], "0");
+    }
+    #[test]
+    fn nonzero_compile_error_is_not_transport_failure() {
+        let data = EMPTY.replace(r#""ok":true"#, r#""ok":false"#);
+        assert!(decode_report(data.as_bytes(), Some(1)).is_ok());
+    }
+    #[test]
+    fn success_exit_mismatch_is_error() {
+        assert!(decode_report(EMPTY.as_bytes(), Some(1)).is_err());
+    }
+    #[test]
+    fn rejects_multiple_objects_and_invalid_payload() {
+        let data = format!("{EMPTY}\n{EMPTY}");
+        assert!(decode_report(data.as_bytes(), Some(0)).is_err());
+    }
+}
