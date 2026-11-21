@@ -55,10 +55,21 @@ class TaskCenter(QWidget):
                 self.items.takeItem(row)
 
     def track(self, job, title):
-        item = self.items.addItem(f"◌  {title} · running")
-        # QListWidget.addItem() returns None; retain the inserted QListWidgetItem.
+        self.items.addItem(f"◌  {title} · running")
         record = self.items.item(self.items.count() - 1)
-        job.finished.connect(lambda r=record, t=title: r.setText(f"✓  {t} · finished"))
+        failed = [False]
+
+        def mark_error(message):
+            failed[0] = True
+            record.setText(f"✕  {title} · failed: {str(message)[:140]}")
+
+        def mark_finished():
+            if not failed[0]:
+                record.setText(f"•  {title} · finished")
+
+        if hasattr(job, "failed"):
+            job.failed.connect(mark_error)
+        job.finished.connect(mark_finished)
 
 
 class ResearchController:
@@ -79,6 +90,7 @@ class ResearchController:
         self.host.nav.setCurrentRow(row)
         for name, button in self.controls.items():
             button.setChecked(name == mode)
+        self.explorer.show()  # The activity rail and project navigation are permanent.
         if mode == "Source Control":
             self.host.history_sections.setCurrentIndex(2)
             self.inspector.show()
@@ -91,7 +103,8 @@ class ResearchController:
             self.inspector.hide()
         else:
             self.inspector.show()
-        self.console.setVisible(mode not in ("Notebooks",))
+        # The user controls the bottom dock; workspace switching must never
+        # silently hide runtime output or execution statistics.
 
     def sync_navigation(self, index):
         mapping = {
@@ -114,6 +127,11 @@ class ResearchController:
             self.host.notebooks.open_file(path)
         elif path.suffix.lower() in (".pm", ".cpp", ".h", ".hpp", ".py", ".txt", ".md"):
             self.host.read_file(path)
+
+    def focus_project(self):
+        self.explorer.show()
+        self.explorer.raise_()
+        self.explorer_tree.setFocus()
 
     def palette(self):
         host = self.host
@@ -138,7 +156,7 @@ class ResearchController:
             ("Workspace: Language Lab", lambda: self.activate("Language Lab")),
             ("Workspace: Performance", lambda: self.activate("Performance")),
             ("Workspace: Source Control", lambda: self.activate("Source Control")),
-            ("Panels: Toggle project explorer", lambda: self.explorer.setVisible(not self.explorer.isVisible())),
+            ("Explorer: Focus project tree", self.focus_project),
             ("Panels: Toggle inspector", lambda: self.inspector.setVisible(not self.inspector.isVisible())),
             ("Panels: Toggle output", lambda: self.console.setVisible(not self.console.isVisible())),
             ("Workspace: Restore default layout", self.reset_layout),
@@ -168,7 +186,11 @@ class ResearchController:
             self.host.nav.setCurrentRow(MODE_TARGETS[mode])
             for name, button in self.controls.items():
                 button.setChecked(name == mode)
-        # Dock visibility comes from restoreState(), not from activating presets.
+        # Older persisted layouts could hide the entire left activity rail.
+        # Force the mandatory explorer back to the left after restoreState().
+        self.host.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.explorer)
+        self.explorer.setFloating(False)
+        self.explorer.show()
 
     def save_layout(self):
         self.host.settings.setValue("research_docks_v4", self.host.saveState(4))
@@ -186,13 +208,20 @@ def _button(title, callback=None, primary=False):
     return btn
 
 
-def _dock(host, name, widget, area):
+def _dock(host, name, widget, area, permanent=False):
     dock = QDockWidget(name, host)
     dock.setObjectName("research" + name.replace(" ", "") + "Dock")
-    dock.setFeatures(
-        QDockWidget.DockWidgetFeature.DockWidgetMovable |
-        QDockWidget.DockWidgetFeature.DockWidgetFloatable |
-        QDockWidget.DockWidgetFeature.DockWidgetClosable)
+    if permanent:
+        # The entire Activity Bar lives here; hiding the dock loses all navigation.
+        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        dock.toggleViewAction().setEnabled(False)
+        dock.setMinimumWidth(222)
+    else:
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable |
+            QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+            QDockWidget.DockWidgetFeature.DockWidgetClosable)
     dock.setWidget(widget)
     host.addDockWidget(area, dock)
     return dock
@@ -300,7 +329,8 @@ def build_research_shell(host, root):
     sidebar.addTab(explorer_tree, "Project")
     sidebar.addTab(host.nav, "Sections")
     navigation_layout.addWidget(sidebar, 1)
-    explorer_dock = _dock(host, "Explorer", navigation, Qt.DockWidgetArea.LeftDockWidgetArea)
+    explorer_dock = _dock(host, "Explorer", navigation,
+                          Qt.DockWidgetArea.LeftDockWidgetArea, permanent=True)
 
     inspector_tabs = QTabWidget()
     inspector_tabs.addTab(host.research_inspector_widget, "Code Insights")
