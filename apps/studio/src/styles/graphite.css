@@ -86,3 +86,9 @@ kbd { font-family: inherit; font-size: 10px; opacity: .52; margin-left: 4px; }
 .status-separator { color: #69727a; }
 @media (max-width: 1050px) { .backend-pill { display: none; } .brand-sub { display: none; } .explorer { width: 205px; } .topbar { gap: 11px; padding: 0 8px; } .top-actions { gap: 1px; } .workspace-hint { display: none; } }
 @media (max-width: 800px) { .top-actions kbd { display: none; } .top-actions button, .top-actions select { padding: 6px; } .explorer { width: 180px; } .metrics-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); } }
+
+.command-overlay{position:fixed;inset:0;z-index:3000;background:#0009;display:flex;justify-content:center;align-items:flex-start;padding-top:100px;}
+.command-dialog{display:flex;flex-direction:column;background:#252b30;border:1px solid #6d7880;box-shadow:0 18px 60px #0008;border-radius:8px;width:min(560px,90vw);max-height:60vh;overflow:auto;padding:9px;gap:3px}
+.command-dialog input{background:#14191d;border:1px solid #424a53;padding:13px;color:#e3e9ee;font-size:13px;border-radius:5px;outline:none}
+.command-dialog button{background:transparent;border:0;text-align:left;padding:12px;color:#ced7de;border-radius:4px;font-size:12px}
+.command-dialog button:hover{background:#354049}

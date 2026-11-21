@@ -33,7 +33,7 @@ export function EditorPane() {
     if (!editor.current || !current) return;
     let model = models.get(modelKey);
     if (!model || model.isDisposed()) {
-      model = monaco.editor.createModel(current.source, "plusminus",
+      model = monaco.editor.createModel(current.source, /\.(cpp|hpp|h)$/.test(current.path) ? "cpp" : "plusminus",
         monaco.Uri.parse("inmemory://plusminus/" + encodeURIComponent(modelKey)));
       models.set(modelKey, model);
     }
@@ -49,6 +49,24 @@ export function EditorPane() {
       if (!ids.has(id)) { model.dispose(); models.delete(id); }
     }
   }, [docs, workspace]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const {path,anchor}=(event as CustomEvent<{path:string;anchor:string}>).detail;
+      if (current?.path !== path || !anchor || !editor.current) return;
+      const model = editor.current.getModel();
+      if (!model) return;
+      const source = model.getValue();
+      const position = source.indexOf(anchor);
+      if (position < 0) return;
+      const line = source.slice(0,position).split("\n").length;
+      editor.current.revealLineInCenter(line);
+      editor.current.setPosition({lineNumber:line,column:1});
+      editor.current.focus();
+    };
+    window.addEventListener("studio:goto-anchor",handler);
+    return () => window.removeEventListener("studio:goto-anchor",handler);
+  },[current?.path]);
 
   return (
     <div className="editor-pane">

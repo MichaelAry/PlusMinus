@@ -64,6 +64,8 @@ async fn choose_workspace(app: AppHandle, state: State<'_, StudioState>) -> Resu
     if !folder.is_dir() { return Err("Workspace is not a directory".into()); }
     let display = folder.to_string_lossy().into_owned();
     *state.root.lock().map_err(|e| e.to_string())? = Some(folder);
+    *state.rebuilt_native.lock().map_err(|e|e.to_string())? = None;
+    state.source_stale.store(false,Ordering::SeqCst);
     Ok(display)
 }
 

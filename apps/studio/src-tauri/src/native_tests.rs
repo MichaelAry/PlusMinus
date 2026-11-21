@@ -2,7 +2,8 @@
 use crate::{history::{self,NativeResult},process,StudioState};
 use serde::{Deserialize,Serialize};
 use std::{collections::HashSet,process::Stdio,time::{Duration,Instant}};
-use tauri::{AppHandle,State,ipc::Channel};
+use tauri::{AppHandle,State,Manager,ipc::Channel};
+use std::sync::atomic::Ordering;
 use tokio::{process::Command,task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -148,6 +149,9 @@ pub async fn run_suite(app:AppHandle,job_id:String,cases:Vec<NativeCase>,
 
 #[tauri::command]
 pub async fn list_native_tests(app:AppHandle)->Result<Vec<NativeCase>,String>{
+    if app.state::<StudioState>().source_stale.load(Ordering::SeqCst) {
+        return Err("C++ source edited: rebuild before discovering tests".into());
+    }
     discover(&app).await
 }
 
@@ -155,6 +159,9 @@ pub async fn list_native_tests(app:AppHandle)->Result<Vec<NativeCase>,String>{
 pub async fn start_native_suite(app:AppHandle,state:State<'_,StudioState>,
   job_id:String,test_ids:Vec<String>,label:String,
   on_event:Channel<NativeEvent>)->Result<String,String>{
+    if state.source_stale.load(Ordering::SeqCst) {
+        return Err("C++ source edited: rebuild before running tests".into());
+    }
     if job_id.len()<8||job_id.len()>80 || !job_id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-'){
         return Err("Invalid job ID".into());
     }

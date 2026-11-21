@@ -80,7 +80,7 @@ pub fn open(root:&Path,relative:&str)->Result<TextDocument,String>{
 
 pub fn save(root:&Path,relative:&str,source:&str,expected:&str)->Result<TextDocument,String>{
  let category=category(relative)?;
- if source.len()>if category=="notebook"{32*1024*1024}else{4*1024*1024}{
+ if source.len() > (if category=="notebook"{32*1024*1024}else{4*1024*1024}) {
     return Err("Document exceeds size limit".into());
  }
  if category=="notebook"{

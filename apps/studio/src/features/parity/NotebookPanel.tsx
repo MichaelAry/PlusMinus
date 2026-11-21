@@ -54,6 +54,20 @@ export function NotebookPanel(){
       setDigest(doc.digest);setDirty(false);setStale({});setSelected(0);setError("");setMessage("Opened "+p);
     }catch(e){setError(String(e));}
   };
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const path=(event as CustomEvent<{path:string}>).detail.path;
+      if(path)void open(path);
+    };
+    window.addEventListener("studio:notebook-open",handler);
+    const requested=sessionStorage.getItem("studio5:open-notebook");
+    if(requested){
+      sessionStorage.removeItem("studio5:open-notebook");
+      void open(requested);
+    }
+    return()=>window.removeEventListener("studio:notebook-open",handler);
+  },[workspace]);
+
   const update=(next:Notebook)=>{
     current.current=next;setNotebook(next);setDirty(true);
   };
