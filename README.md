@@ -138,3 +138,7 @@ CMake now builds `plusminus_native_tests` using adapters generated from all **22
 ## Studio Native C++ Test Laboratory
 
 Test Center now has two modes: fast built-in PlusMinus checks and the full original C++ suite. The Native tab discovers all methods and offers Run selected, Run quick (skips slow scaling classes), and Run all 225 (explicit opt-in); every method runs as a separate time-limited OS process so test crashes cannot crash Studio. Live results and sampled resource statistics are shown in the table. Each batch persists in SQLite with Git SHA, modified-tree flag, source fingerprint and platform. Set a baseline from the latest run and compare new failures, fixes, missing/new tests and per-method timing changes. Double-click a native test to open its C++ source in the multi-document editor.
+
+## Code analysis graphs
+
+The additional Code Analysis workspace displays a zoomable control-flow graph from compiled bytecode (branch targets and fall-through edges) and a heuristic call graph derived from PlusMinus function declarations/calls. Double-click a graph node to navigate to the compiled instruction or function source. Graph rendering caps very large bytecode programs to keep the UI responsive; the source call graph is marked heuristic rather than a full semantic proof. Profile mode (F6) now counts executed opcodes with atomic counters across VM threads, separate from static bytecode counts, and visualizes the dynamic distribution.

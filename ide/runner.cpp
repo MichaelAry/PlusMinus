@@ -1,6 +1,7 @@
 #include "Parser.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
@@ -72,7 +73,7 @@ static std::string variables(const VM& vm) {
 }
 int main(int argc, char** argv) {
     const std::string mode = argc == 2 ? argv[1] : "run";
-    if (mode != "run" && mode != "compile") { std::cerr << "Usage: plusminus_runner [run|compile]\n"; return 2; }
+    if (mode != "run" && mode != "compile" && mode != "profile") { std::cerr << "Usage: plusminus_runner [run|compile|profile]\n"; return 2; }
     std::string source{std::istreambuf_iterator<char>(std::cin), {}};
     std::string code, output, vars, result, error;
     std::string phase = "compile";
@@ -80,15 +81,18 @@ int main(int argc, char** argv) {
     double compileMs = 0.0, executeMs = 0.0;
     size_t instructionCount = 0;
     size_t errorLine = 0, errorColumn = 0;
+    std::string dynamicCounts = "{}";
+    std::uint64_t executedInstructions = 0;
     try {
         auto compilationStart = Clock::now();
         auto program = compileToCommands(source);
         compileMs = std::chrono::duration<double, std::milli>(Clock::now() - compilationStart).count();
         instructionCount = program.size();
         code = listing(program);
-        if (mode == "run") {
+        if (mode == "run" || mode == "profile") {
             phase = "runtime";
             VM vm;
+            vm.profileEnabled = (mode == "profile");
             auto executionStart = Clock::now();
             try { result = number(vm.run(program)); }
             catch (...) {
@@ -99,6 +103,21 @@ int main(int argc, char** argv) {
             executeMs = std::chrono::duration<double, std::milli>(Clock::now() - executionStart).count();
             output = vm.output;
             vars = variables(vm);
+            if (vm.profileEnabled) {
+                std::ostringstream counts;
+                counts << "{";
+                bool first = true;
+                for (std::size_t index = 0; index < VM::OpcodeCount; ++index) {
+                    const auto hits = vm.opcodeCounts[index].load(std::memory_order_relaxed);
+                    if (hits == 0) continue;
+                    executedInstructions += hits;
+                    if (!first) counts << ",";
+                    first = false;
+                    counts << quote(opcode(static_cast<OpCode>(index))) << ":" << hits;
+                }
+                counts << "}";
+                dynamicCounts = counts.str();
+            }
         }
     } catch (const CompileError& e) {
         error = phase + ": " + e.what();
@@ -122,6 +141,8 @@ int main(int argc, char** argv) {
         << ",\"diagnostics\":" << diagnostic.str()
         << ",\"metrics\":{\"compile_ms\":" << compileMs
         << ",\"execute_ms\":" << executeMs
-        << ",\"program_instructions\":" << instructionCount << "}}\n";
+        << ",\"program_instructions\":" << instructionCount
+        << ",\"executed_instructions\":" << executedInstructions
+        << ",\"opcode_hits\":" << dynamicCounts << "}}\n";
     return error.empty() ? 0 : 1;
 }

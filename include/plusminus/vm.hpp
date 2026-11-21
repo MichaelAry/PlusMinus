@@ -2,6 +2,9 @@
 #include "plusminus/value.hpp"
 #include "plusminus/bytecode.hpp"
 #include <cstddef>
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -32,6 +35,10 @@ public:
     std::mutex outputMutex;  // защищает output
     std::mutex threadsMutex; // защищает threads
     std::mutex locksMutex;   // защищает namedLocks map
+
+    bool profileEnabled = false;
+    static constexpr std::size_t OpcodeCount = static_cast<std::size_t>(OpCode::Halt) + 1;
+    std::array<std::atomic<std::uint64_t>, OpcodeCount> opcodeCounts{};
 
     double run(const std::vector<Command>& program);
 

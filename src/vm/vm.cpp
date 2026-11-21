@@ -10,6 +10,7 @@ double VM::run(const std::vector<Command>& program) {
     functions.clear();
     namedLocks.clear();
     threads.clear();
+    for (auto& counter : opcodeCounts) counter.store(0,std::memory_order_relaxed);
 
     // PRE-SCAN: регистрируем все функции ДО запуска потоков.
     // Это делает functions read-only во время выполнения -> безопасно без мьютекса.
