@@ -2,8 +2,17 @@
 #include "plusminus/bytecode.hpp"
 #include <cstddef>
 #include <string>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
+
+// Structured compile errors retain the parser's source coordinate.
+struct CompileError : std::runtime_error {
+    std::size_t offset, line, column;
+    CompileError(const std::string& message, std::size_t off,
+                 std::size_t ln, std::size_t col)
+        : std::runtime_error(message), offset(off), line(ln), column(col) {}
+};
 
 class Compiler {
 public:

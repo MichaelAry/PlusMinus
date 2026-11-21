@@ -79,6 +79,7 @@ int main(int argc, char** argv) {
     using Clock = std::chrono::steady_clock;
     double compileMs = 0.0, executeMs = 0.0;
     size_t instructionCount = 0;
+    size_t errorLine = 0, errorColumn = 0;
     try {
         auto compilationStart = Clock::now();
         auto program = compileToCommands(source);
@@ -99,12 +100,26 @@ int main(int argc, char** argv) {
             output = vm.output;
             vars = variables(vm);
         }
+    } catch (const CompileError& e) {
+        error = phase + ": " + e.what();
+        errorLine = e.line;
+        errorColumn = e.column;
     } catch (const std::exception& e) { error = phase + ": " + e.what(); }
       catch (...) { error = phase + ": unknown failure"; }
+    std::ostringstream diagnostic;
+    diagnostic << "[";
+    if (!error.empty()) {
+        diagnostic << "{\"severity\":\"error\",\"phase\":" << quote(phase)
+                   << ",\"message\":" << quote(error)
+                   << ",\"line\":" << errorLine
+                   << ",\"column\":" << errorColumn << "}";
+    }
+    diagnostic << "]";
     std::cout << "{\"ok\":" << (error.empty() ? "true" : "false")
         << ",\"output\":" << quote(output) << ",\"result\":" << quote(result)
         << ",\"variables\":" << quote(vars) << ",\"bytecode\":" << quote(code)
         << ",\"error\":" << quote(error)
+        << ",\"diagnostics\":" << diagnostic.str()
         << ",\"metrics\":{\"compile_ms\":" << compileMs
         << ",\"execute_ms\":" << executeMs
         << ",\"program_instructions\":" << instructionCount << "}}\n";

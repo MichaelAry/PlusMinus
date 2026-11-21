@@ -18,7 +18,7 @@ from collections import Counter
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, QTimer, QSettings, Signal, QPointF, QRectF
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QSyntaxHighlighter, QTextCharFormat, QAction
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QAction
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QPlainTextEdit, QSplitter, QTableWidget, QTableWidgetItem,
@@ -36,6 +36,7 @@ from workspace import WorkspaceTabs
 from documents import DocumentTabs
 from native_test_view import NativeTestPanel
 from highlighting import CppHighlighter
+from source_diagnostics import analyze_diagnostics
 from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
 
@@ -234,6 +235,32 @@ class CodeEditor(QPlainTextEdit):
         self.blockCountChanged.connect(self.update_gutter_width)
         self.updateRequest.connect(self.update_gutter)
         self.update_gutter_width(0)
+        self._diagnostic_lines = set()
+
+    def set_diagnostics(self, issues):
+        markers = []
+        highlights = set()
+        for issue in issues:
+            number = int(issue.get('line') or 0)
+            column = int(issue.get('column') or 1)
+            block = self.document().findBlockByNumber(number-1)
+            if not block.isValid():
+                continue
+            highlights.add(number)
+            marker = QTextEdit.ExtraSelection()
+            cursor = self.textCursor()
+            cursor.setPosition(min(block.position()+max(0,column-1),
+                                   block.position()+max(0,block.length()-1)))
+            cursor.movePosition(QTextCursor.MoveOperation.NextCharacter,
+                                QTextCursor.MoveMode.KeepAnchor)
+            marker.cursor = cursor
+            marker.format.setUnderlineColor(
+                QColor('#F08A8A' if issue.get('severity')=='error' else '#D9B579'))
+            marker.format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+            markers.append(marker)
+        self._diagnostic_lines = highlights
+        self.setExtraSelections(markers)
+        self.gutter.update()
 
     def mousePressEvent(self, event):
         if (event.button() == Qt.MouseButton.LeftButton and
@@ -283,7 +310,8 @@ class CodeEditor(QPlainTextEdit):
         bottom = top + int(self.blockBoundingRect(block).height())
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
-                painter.setPen(QColor('#91a0b6'))
+                painter.setPen(QColor('#E58C8C' if number+1 in self._diagnostic_lines
+                                      else '#91a0b6'))
                 painter.drawText(0,top,self.gutter.width()-7,
                     self.fontMetrics().height(),Qt.AlignmentFlag.AlignRight,str(number+1))
             block = block.next()
@@ -378,6 +406,10 @@ class Studio(QMainWindow):
         self.analysis_timer.setSingleShot(True)
         self.analysis_timer.setInterval(300)
         self.analysis_timer.timeout.connect(self.update_analysis)
+        self.diagnostic_timer = QTimer(self)
+        self.diagnostic_timer.setSingleShot(True)
+        self.diagnostic_timer.setInterval(650)
+        self.diagnostic_timer.timeout.connect(self.request_compile_diagnostics)
         QTimer.singleShot(450, self.auto_tests)
         QTimer.singleShot(1200, self.discover_native)
 
@@ -523,13 +555,20 @@ class Studio(QMainWindow):
         self.output.setReadOnly(True)
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
+        problems_widget = QWidget()
+        problems_layout = QVBoxLayout(problems_widget)
+        problems_layout.setContentsMargins(2,2,2,2)
+        self.problems_table = table(['Severity', 'Code', 'Line', 'Column', 'Description'])
+        self.problems_table.doubleClicked.connect(self.jump_to_problem)
+        problems_layout.addWidget(self.problems_table, 2)
+        problems_layout.addWidget(self.diagnostics, 1)
         self.bytecode = QPlainTextEdit()
         self.bytecode.setReadOnly(True)
         self.variables = QPlainTextEdit()
         self.variables.setReadOnly(True)
-        for name, widget in [('Output',self.output),('Diagnostics',self.diagnostics),
-                             ('Bytecode',self.bytecode),('Variables',self.variables)]:
-            results.addTab(widget,name)
+        for title, widget in [('Output',self.output),('Problems',problems_widget),
+                              ('Bytecode',self.bytecode),('Variables',self.variables)]:
+            results.addTab(widget,title)
         self.result_tabs = results
         layout.addWidget(results, 2)
         return page_widget
@@ -771,6 +810,64 @@ class Studio(QMainWindow):
             self.update_analysis()
             self.update_cursor()
 
+    def present_problems(self, issues, editor=None):
+        editor = editor or self.editor
+        editor.set_diagnostics(issues)
+        editor._issues = list(issues)
+        if editor is not self.editor:
+            return
+        self.current_problems = list(issues)
+        rows = [(str(item.get('severity','info')).upper(), item.get('code',''),
+                 item.get('line') or '—', item.get('column') or '—',
+                 item.get('message','')) for item in issues]
+        fill_table(self.problems_table,rows)
+        if issues:
+            self.diagnostics.setPlainText('\n'.join(
+                f"{r[0]} {r[1]} ({r[2]}:{r[3]}): {r[4]}" for r in rows))
+        else:
+            self.diagnostics.setPlainText('No current diagnostics.')
+
+    def jump_to_problem(self, *_):
+        row = self.problems_table.currentRow()
+        if not 0 <= row < len(getattr(self,'current_problems', [])):
+            return
+        issue = self.current_problems[row]
+        number = int(issue.get('line') or 0)
+        if number <= 0:
+            return
+        block = self.editor.document().findBlockByNumber(number-1)
+        if block.isValid():
+            cursor = self.editor.textCursor()
+            cursor.setPosition(min(block.position()+max(0,int(issue.get('column') or 1)-1),
+                                   block.position()+max(0,block.length()-1)))
+            self.editor.setTextCursor(cursor)
+            self.editor.setFocus()
+            self.editor.centerCursor()
+            self.nav.setCurrentRow(1)
+
+    def request_compile_diagnostics(self):
+        if not self.runner or self.native_building:
+            return
+        doc = self.documents.current_document()
+        if not doc or (doc.path and doc.path.suffix.lower() in ('.cpp','.h','.hpp')):
+            return
+        if any(job.isRunning() for job in self.jobs):
+            return
+        source = doc.editor.toPlainText()
+        runner = self.runner
+        self.spawn(lambda: execute(runner,source,'compile',5.0),
+                   lambda report, d=doc, text=source: self.compiled_diagnostics_done(d,text,report),
+                   'Background syntax check')
+
+    def compiled_diagnostics_done(self, doc, source, report):
+        if doc.editor.toPlainText() != source:
+            return
+        issues = analyze_diagnostics(source) + list(report.get('diagnostics') or [])
+        self.present_problems(issues,doc.editor)
+        if doc is self.documents.current_document():
+            self.statusBar().showMessage(
+                f'{len(issues)} diagnostics' if issues else 'Syntax check passed', 2500)
+
     def update_cursor(self):
         cursor = self.editor.textCursor()
         self.cursor_label.setText(f'Line {cursor.blockNumber()+1}  ·  Column {cursor.positionInBlock()+1}')
@@ -788,6 +885,14 @@ class Studio(QMainWindow):
         ]))
         self.code_warnings.setPlainText('\n'.join(metrics['warnings']) if metrics['warnings']
                                         else 'No lexical warnings. Static analysis is heuristic, not a proof of correctness.')
+        doc = self.documents.current_document()
+        is_cpp = bool(doc and doc.path and doc.path.suffix.lower() in ('.cpp','.h','.hpp'))
+        if is_cpp:
+            self.present_problems([],self.editor)
+        else:
+            self.present_problems(analyze_diagnostics(self.editor.toPlainText()),self.editor)
+            if hasattr(self,'diagnostic_timer'):
+                self.diagnostic_timer.start()
         doc = self.documents.current_document()
         self.file_label.setText((doc.path.name if doc and doc.path else 'untitled.pm') +
                                  ('  ● unsaved changes' if doc and doc.modified else ''))
@@ -867,6 +972,8 @@ class Studio(QMainWindow):
         self.last_report = report
         self.output.setPlainText(report['output'] + (f"\nReturn: {report['result']}" if report['result'] else ''))
         self.diagnostics.setPlainText(report['error'] or 'Execution successful; no runtime diagnostics.')
+        self.present_problems(
+            analyze_diagnostics(source) + list(report.get('diagnostics') or []))
         self.bytecode.setPlainText(report['bytecode'])
         self.variables.setPlainText(report['variables'])
         self.result_tabs.setCurrentIndex(1 if report['error'] else 0)
