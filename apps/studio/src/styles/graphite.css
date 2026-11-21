@@ -92,3 +92,19 @@ kbd { font-family: inherit; font-size: 10px; opacity: .52; margin-left: 4px; }
 .command-dialog input{background:#14191d;border:1px solid #424a53;padding:13px;color:#e3e9ee;font-size:13px;border-radius:5px;outline:none}
 .command-dialog button{background:transparent;border:0;text-align:left;padding:12px;color:#ced7de;border-radius:4px;font-size:12px}
 .command-dialog button:hover{background:#354049}
+
+/* Bounded, interactive replay of the original C++ post-execution trace. */
+.trace-replay{display:flex;flex-direction:column;min-height:0;height:100%;gap:9px}
+.trace-controls{display:flex;align-items:center;gap:9px;min-height:32px}
+.trace-controls button{padding:6px 10px;background:#2a3036;border:1px solid #45505a;border-radius:4px;color:#d3dbe3;font-size:11px}
+.trace-controls button:disabled{opacity:.4;cursor:not-allowed}
+.trace-controls input[type=range]{flex:1;accent-color:#b8c3cf;min-width:50px}
+.trace-controls span{white-space:nowrap;color:#a2adb8;font:11px/1.5 Consolas,monospace}
+.trace-selected{display:flex;align-items:center;gap:20px;flex-wrap:wrap;background:#23292e;padding:10px 14px;border:1px solid #3b434b;border-radius:5px;font-size:11px}
+.trace-selected strong{color:#e4ebf2}
+.trace-selected span{color:#b0bac4}
+.trace-timeline{flex:1;min-height:120px;max-height:400px;overflow:auto;border:1px solid #343d45;border-radius:5px;background:#171c20}
+.trace-event{display:flex;align-items:center;gap:15px;text-align:left;border:0;border-bottom:1px solid #313941;background:transparent;color:#bac4ce;font:11px/1.4 Consolas,monospace;padding:0 13px;cursor:pointer}
+.trace-event span:first-child{width:55px;color:#8c99a4}
+.trace-event strong{color:#d8e1e9;min-width:105px}
+.trace-event.active,.trace-event:hover{background:#323d46}
