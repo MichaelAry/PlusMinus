@@ -84,6 +84,9 @@ jobs:
       - name: Stage sidecars for Tauri
         run: node scripts/stage-native.mjs --build-dir build/studio5 --target ${{ matrix.triple }}
 
+      - name: Smoke native C++ process protocol
+        run: node scripts/smoke-native.mjs --build-dir build/studio5
+
       - name: Install frontend dependencies
         working-directory: apps/studio
         run: npm install --no-audit --no-fund

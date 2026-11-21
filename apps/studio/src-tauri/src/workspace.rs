@@ -49,12 +49,13 @@ pub fn list(root: &Path) -> Result<Vec<Entry>, String> {
             if kind.is_symlink() { continue; }
             let is_dir = kind.is_dir();
             if !is_dir && (!kind.is_file() || item.path().extension().and_then(|s| s.to_str()) != Some("pm")) { continue; }
-            let relative = item.path().strip_prefix(root).map_err(|e| e.to_string())?;
+            let entry_path = item.path();
+            let relative = entry_path.strip_prefix(root).map_err(|e| e.to_string())?;
             entries.push(Entry {
                 path: relative.to_string_lossy().replace('\\', "/"),
                 name, directory: is_dir, depth
             });
-            if is_dir { visit(root, &item.path(), depth + 1, entries)?; }
+            if is_dir { visit(root, &entry_path, depth + 1, entries)?; }
         }
         Ok(())
     }

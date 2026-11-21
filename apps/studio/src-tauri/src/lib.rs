@@ -2,7 +2,7 @@ mod process;
 mod workspace;
 
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
 
