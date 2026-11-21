@@ -43,11 +43,16 @@ def main() -> int:
         raise RuntimeError(f"Unsupported release platform: {sys.platform}")
     machine = platform.machine().lower().replace("amd64", "x86_64").replace("aarch64", "arm64")
     # macOS .app must be onedir; Windows/Linux use onefile (no installed Python).
+    from native_tests import find_native_runner
+    native = find_native_runner()
+    if native is None:
+        raise RuntimeError("Native test executable missing; rebuild all CMake targets.")
     command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
                "--distpath", str(DIST), "--workpath", str(ROOT / "build" / "pyinstaller"),
                "--specpath", str(ROOT / "build" / "pyinstaller"),
                "--name", APP, "--windowed", "--onedir" if sys.platform == "darwin" else "--onefile",
-               "--add-binary", f"{runner}{os.pathsep}.", str(IDE / "studio_qt.py")]
+               "--add-binary", f"{runner}{os.pathsep}.",
+               "--add-binary", f"{native}{os.pathsep}.", str(IDE / "studio_qt.py")]
     subprocess.run(command, cwd=str(ROOT), check=True)
     base_name = f"{APP}-{platform_name}-{machine}"
     if sys.platform == "win32":

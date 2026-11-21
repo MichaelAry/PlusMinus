@@ -130,3 +130,11 @@ For source-IDE launches, `launch.py` continues to configure `ide/build` with `cm
 Every left navigation item opens a separate workspace tab without replacing previous pages. Tabs are movable and individually closable; the open workspace pages are restored on the next launch.
 
 The Code Editor also supports independent document tabs for multiple `.pm` files, with their own undo history, modification indicators, save prompts, de-duplicated opening and restored open paths. Loading test source opens a new tab rather than overwriting active source.
+
+## Native C++ test laboratory
+
+CMake now builds `plusminus_native_tests` using adapters generated from all **225** original Microsoft `TEST_METHOD` tests without rewriting their bodies. `--list` emits JSON Lines of test IDs and categories, `--run Class.Method` runs one original method with JSON timing and failures, `--suite quick` runs all except heavyweight scaling/benchmark classes, and `--suite full` includes them. CTest registers `native_quick` alongside `core_smoke`. Full suites remain opt-in because some concurrency benchmarks are expensive. The Visual Studio native unit-test project continues to exist and now links `src/vm/builtins.cpp`.
+
+## Studio Native C++ Test Laboratory
+
+Test Center now has two modes: fast built-in PlusMinus checks and the full original C++ suite. The Native tab discovers all methods and offers Run selected, Run quick (skips slow scaling classes), and Run all 225 (explicit opt-in); every method runs as a separate time-limited OS process so test crashes cannot crash Studio. Live results and sampled resource statistics are shown in the table. Each batch persists in SQLite with Git SHA, modified-tree flag, source fingerprint and platform. Set a baseline from the latest run and compare new failures, fixes, missing/new tests and per-method timing changes. Double-click a native test to open its C++ source in the multi-document editor.

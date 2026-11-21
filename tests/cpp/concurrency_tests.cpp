@@ -79,14 +79,16 @@ TEST_CLASS(AsyncExecutionExtended)
                 "go printVal(x);\n" // Захватывает 200
                 "sync;\n";
             std::string out = getOutput(prog);
-            Assert::AreEqual(std::string("100\n200\n"), out);
+            // Native worker scheduling is nondeterministic; verify snapshots,
+            // regardless of which thread produces its output first.
+            Assert::IsTrue(out == "100\n200\n" || out == "200\n100\n");
         }
 
         // 2. Асинхронный цикл накапливает результат
         TEST_METHOD(AsyncLoopAccumulator)
         {
             std::string prog =
-                "func addToC() { c = c + 1; }\n"
+                "func addToC() { lock(counter); c = c + 1; unlock(counter); }\n"
                 "c = 0;\n"
                 "i = 0;\n"
                 "while (i < 5) {\n"

@@ -38,3 +38,32 @@ if(BUILD_TESTING)
     target_link_libraries(plusminus_core_smoke PRIVATE plusminus_core)
     add_test(NAME core_smoke COMMAND plusminus_core_smoke)
 endif()
+
+# Full original C++ test suite: generated cross-platform registration adapters.
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        set(PM_GENERATED_NATIVE "${CMAKE_CURRENT_BINARY_DIR}/generated-native")
+        set(PM_TEST_GROUPS arithmetic control_flow bytecode arrays builtins concurrency functions)
+        set(PM_WRAPPERS)
+        set(PM_TEST_FILES)
+        foreach(group IN LISTS PM_TEST_GROUPS)
+            list(APPEND PM_WRAPPERS "${PM_GENERATED_NATIVE}/${group}_tests_registration.cpp")
+            list(APPEND PM_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp/${group}_tests.cpp")
+        endforeach()
+        add_custom_command(
+            OUTPUT ${PM_WRAPPERS}
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_native_tests.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}" "${PM_GENERATED_NATIVE}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_native_tests.py" ${PM_TEST_FILES}
+            COMMENT "Registering 225 native PlusMinus tests"
+            VERBATIM
+        )
+        add_executable(plusminus_native_tests tests/portable/main.cpp ${PM_WRAPPERS})
+        target_include_directories(plusminus_native_tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/portable" "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(plusminus_native_tests PRIVATE plusminus_core)
+        add_test(NAME native_quick COMMAND plusminus_native_tests --suite quick)
+        set_tests_properties(native_quick PROPERTIES TIMEOUT 150)
+    endif()
+endif()
