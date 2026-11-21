@@ -142,3 +142,7 @@ Test Center now has two modes: fast built-in PlusMinus checks and the full origi
 ## Code analysis graphs
 
 The additional Code Analysis workspace displays a zoomable control-flow graph from compiled bytecode (branch targets and fall-through edges) and a heuristic call graph derived from PlusMinus function declarations/calls. Double-click a graph node to navigate to the compiled instruction or function source. Graph rendering caps very large bytecode programs to keep the UI responsive; the source call graph is marked heuristic rather than a full semantic proof. Profile mode (F6) now counts executed opcodes with atomic counters across VM threads, separate from static bytecode counts, and visualizes the dynamic distribution.
+
+## Git-aware history and regression trends
+
+History & Reports contains separate panes for program runs, C++ testing sessions, and a read-only Git summary. Native session graphs visualize pass percentages and elapsed suite time across runs, while each stored session retains commit SHA, source fingerprint, platform, and per-test verdicts. The Git pane shows branch, dirty working tree, diff summary and recent commits without making changes to the repository. All Git operations are local-only and optional.

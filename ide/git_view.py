@@ -29,5 +29,5 @@ class GitPanel(QWidget):
         self.status.setText(f"{state['branch']} · {state['sha']} · "
                             + ('modified' if state['dirty'] else 'clean'))
         self.details.setPlainText(
-            'CHANGED FILES\\n'+state['changes']+'\\n\\nDIFF SUMMARY\\n'+state['diff']
-            +'\\n\\nRECENT COMMITS\\n'+state['commits'])
+            'CHANGED FILES\n'+state['changes']+'\n\nDIFF SUMMARY\n'+state['diff']
+            +'\n\nRECENT COMMITS\n'+state['commits'])
