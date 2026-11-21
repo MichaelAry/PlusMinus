@@ -69,7 +69,8 @@ async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: proc
         };
     }
     let passed = result.as_ref().ok().and_then(|r|r.report["ok"].as_bool()).unwrap_or(false);
-    state.tasks.advance(&id, passed)?;
+    // A canceled invocation did not finish a test; never count it as FAIL.
+    if !was_canceled { state.tasks.advance(&id, passed)?; }
     state.tasks.complete(&id,None,was_canceled,result.as_ref().err().cloned());
     result
 }

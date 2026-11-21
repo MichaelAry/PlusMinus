@@ -47,6 +47,19 @@ fn count_table(db: &Connection, name: &str) -> Result<i64, String> {
     db.query_row(query, [], |r| r.get(0)).map_err(|e| e.to_string())
 }
 
+const STUDIO_SCHEMA_VERSION: i64 = 5;
+
+fn checked_schema_version(db: &Connection) -> Result<i64, String> {
+    let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if version > STUDIO_SCHEMA_VERSION {
+        return Err(format!(
+            "Unsupported future studio-v5.db schema version {version}; expected <= {STUDIO_SCHEMA_VERSION}. Database untouched."
+        ));
+    }
+    Ok(version)
+}
+
 fn verify(db: &Connection) -> Result<(), String> {
     let check: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -67,7 +80,10 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
             Some(Connection::open_with_flags(&old, OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .map_err(|e| e.to_string())?)
         } else { None };
-        if let Some(ref source) = source { verify(source)?; }
+        if let Some(ref source) = source {
+            verify(source)?;
+            checked_schema_version(source)?;
+        }
         let mut new_db = Connection::open(&temp).map_err(|e| e.to_string())?;
         let backup_result = (|| -> Result<(), String> {
             if let Some(ref src) = source {
@@ -82,6 +98,9 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
                     }
                 }
             }
+            // Complete the schema upgrade in a temporary database before publishing
+            // studio-v5.db. Failure cannot leave a partial newly-created v5 database.
+            migrate_schema(&mut new_db)?;
             Ok(())
         })();
         drop(new_db);
@@ -94,7 +113,14 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
         fs::rename(&temp, &dest).map_err(|e| e.to_string())?;
     }
     let mut db = Connection::open(&dest).map_err(|e| e.to_string())?;
+    migrate_schema(&mut db)?;
+    Ok(dest)
+}
+
+/// Idempotent: a failed schema transaction rolls back without partial upgrades.
+fn migrate_schema(db: &mut Connection) -> Result<(), String> {
     db.busy_timeout(Duration::from_secs(12)).map_err(|e| e.to_string())?;
+    checked_schema_version(db)?;
     {
         let tx = db.transaction().map_err(|e| e.to_string())?;
         tx.execute_batch(
@@ -135,8 +161,8 @@ fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
         }
         tx.commit().map_err(|e| e.to_string())?;
     }
-    verify(&db)?;
-    Ok(dest)
+    verify(db)?;
+    Ok(())
 }
 
 fn now() -> String {
@@ -505,6 +531,22 @@ mod tests {
         assert_eq!(Sha256::digest(fs::read(&old).unwrap()),old_hash);
         drop(migrated);
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test] fn rejects_future_schema_without_mutating_existing_v5_data() {
+        let root = std::env::temp_dir().join(format!("studio5-future-schema-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        let dest = root.join("studio-v5.db");
+        {
+            let db = Connection::open(&dest).unwrap();
+            db.execute_batch("PRAGMA user_version=999; CREATE TABLE future_data(value TEXT);
+                INSERT INTO future_data(value) VALUES('keep me');").unwrap();
+        }
+        let original = fs::read(&dest).unwrap();
+        assert!(initialize_at(dest.clone()).unwrap_err().contains("future"));
+        assert_eq!(fs::read(&dest).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test] fn sqlite_backup_preserves_original_rows(){

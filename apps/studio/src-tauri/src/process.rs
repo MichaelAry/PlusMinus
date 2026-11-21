@@ -266,6 +266,24 @@ mod tests {
         },CancellationToken::new()).await;
         assert!(result.unwrap_err().contains("timed out"));
     }
+    #[tokio::test]
+    async fn actual_cpp_cancellation_is_reported_and_child_is_stopped() {
+        let Some(path)=staged_cpp_runner() else{return;};
+        let token=CancellationToken::new();
+        let cancel=token.clone();
+        let running=tokio::spawn(async move {
+            execute_with_executable(path,RunRequest {
+                job_id:"cpp-cancel-001".into(),source:"while (1) {}".into(),
+                mode:RunMode::Run,timeout_ms:10000,
+            },cancel).await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        token.cancel();
+        let outcome=tokio::time::timeout(Duration::from_secs(3),running)
+            .await.expect("Canceled runner did not exit promptly").unwrap();
+        assert!(outcome.unwrap_err().contains("Canceled by user"));
+    }
+
     #[test]
     fn empty_stdout_and_zero_result_are_not_lost() {
         let result = decode_report(EMPTY.as_bytes(), Some(0)).unwrap();
