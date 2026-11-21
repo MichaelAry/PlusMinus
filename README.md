@@ -278,3 +278,12 @@ If the minimal Qt probe also crashes, capture the Windows Event Viewer
 Application Error entry (faulting module and exception code), and record
 Python / PySide6 / Qt versions before changing dependencies. Never delete
 `%USERPROFILE%\\.plusminus` merely to troubleshoot a startup failure.
+
+## Studio 5 Windows/Linux x64 candidate
+
+The Tauri/Rust/React desktop workbench in `apps/studio/` is in Stage 3
+pre-cutover review, **NOT READY** to replace Qt. The original source
+launch scripts and Qt data remain intact.
+
+See [Stage 3 acceptance, packaging and rollback](docs/migration/STAGE3_WINDOWS_LINUX.md)
+and [performance comparison matrix](docs/migration/PERFORMANCE_BASELINE.md).

@@ -20,7 +20,7 @@ interface StudioStore {
   transportError: string | null;
   setWorkspace: (workspace: string, entries: TreeEntry[]) => void;
   setEntries: (entries: TreeEntry[]) => void;
-  open: (doc: Document) => void;
+  open: (doc: Document, focus?: boolean) => void;
   close: (id: string) => void;
   edit: (id: string, source: string) => void;
   saved: (id: string, doc: Document) => void;
@@ -54,18 +54,19 @@ export const useStudio = create<StudioStore>((set) => ({
       response: null, transportError: null };
   }),
   setEntries: (entries) => set({ entries }),
-  open: (doc) => set((s) => ({
+  open: (doc, focus = true) => set((s) => ({
     documents: s.documents.some((d) => d.id === doc.path) ? s.documents : [...s.documents, { ...doc, id: doc.path, dirty: false }],
-    activeId: doc.path,
+    activeId: focus ? doc.path : s.activeId,
   })),
   close: (id) => set((s) => {
     const rest = s.documents.filter((d) => d.id !== id);
     if (rest.length === 0) rest.push(newUntitled());
     return { documents: rest, activeId: s.activeId === id ? rest[rest.length - 1].id : s.activeId };
   }),
-  edit: (id, source) => set((s) => ({
-    documents: s.documents.map((d) => d.id === id ? { ...d, source, dirty: true } : d),
-  })),
+  edit: (id, source) => set((s) => {
+    if (!s.documents.some(d=>d.id===id && d.source!==source))return s;
+    return {documents:s.documents.map(d=>d.id===id?{...d,source,dirty:true}:d)};
+  }),
   saved: (id, doc) => set((s) => ({
     documents: s.documents.map((d) => d.id === id ? { ...d, id: doc.path, digest: doc.digest, path: doc.path, dirty: d.source !== doc.source } : d),
     activeId: s.activeId === id ? doc.path : s.activeId,

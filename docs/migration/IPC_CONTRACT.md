@@ -111,3 +111,15 @@ and explicitly missing `null` values are preserved.
 
 The C++ runner still takes one argv mode and UTF-8 stdin ending with EOF;
 no JSON-RPC, debugger or persistent notebook kernel is introduced.
+
+## Stage 3 scope and runtime contract — Windows/Linux x64
+
+The unchanged C++ runner is still one-shot UTF-8 + EOF and single JSON
+response. Stage 3 uses Unix process groups and Windows taskkill /T /F as
+best-effort descendant cleanup on cancellation/timeout. No Job Object
+guarantee or adversarial orphan regression has been established.
+
+In the frontend, validated workspace-relative paths and the active filename
+are stored locally for clean-tab restoration after user explicitly reselects
+that workspace. Unsaved source is deliberately NOT stored. New atomic file
+write serialization is process-local, not a cross-process lock.

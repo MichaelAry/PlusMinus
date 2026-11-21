@@ -2,7 +2,7 @@
 
 **Baseline:** original Qt/C++ revision `41360ed7f470dd76da264b24ff74171ef55da5c2`.
 **Migration base:** `master` at `5ebab2836f6ba914373abfa23c8d17c007d14af8`.
-**Proposed fixes:** `feature/studio5-parity-fixes` / draft PR #22, incorporating PR #21 commits unchanged.
+**Merged fixes:** PR #22 into `master` at `a33ad24582f11594ada2118e0a5764d33d53f44d`. Stage 3 PR #23 targets Windows x64 and Linux x64 only; evidence below remains conservative.
 **Status definitions:** DONE = independently confirmed by meaningful tests or immutable Git comparison; PARTIAL = implemented but incomplete or GUI confirmation unavailable; MISSING = not implemented; BLOCKED = impossible under the unchanged runner contract. A successful compile alone never proves desktop feature parity.
 
 ## Stage 1 — Foundation
@@ -19,7 +19,7 @@
 | Single JSON object, exact exit codes, nested protocol validation | PARTIAL | `process.rs` decode_report tests incl. invalid diagnostics/trace/metrics | PR #22 CI on actual binaries |
 | Empty stdout, result \"0\", compile/runtime errors | PARTIAL | `present.ts`, `process.rs` tests, original native smoke | GUI display of all cases |
 | stderr, output bounds and history errors | PARTIAL | `process.rs`, `lib.rs`, `OutputPane.tsx` | IPC + UI negative-path testing |
-| Timeouts and cancellation of immediate native child | PARTIAL | `process.rs` tests and CancellationToken | OS process group/Job Object, orphan regression |
+| Timeouts/cancellation and descendants | PARTIAL | Stage 3 `process_tree.rs`: Unix process group kill, Windows best-effort taskkill /T /F | Windows Job Object/orphan regression NOT VERIFIED |
 | Secure workspace-relative paths and optimistic saves | PARTIAL | `workspace.rs` and `extra_files.rs` tests | TOCTOU/symlink attacks and concurrent writers |
 | Windows/Linux/macOS x64 packaging of both sidecars | PARTIAL | `studio5.yml`, `stage-native.mjs`; inherited CI passed | PR #22 CI, installed launch and IPC, ARM64 |
 | Typed TS/Rust invoke declarations | PARTIAL | `src/api/contracts.ts`, `src-tauri/src/{lib,process}.rs` | Generated contract parity/round-trip E2E |
@@ -47,7 +47,7 @@
 | SQLite Studio 4 -> studio-v5.db | PARTIAL | `history.rs`: read-only backup, versioning, atomic no-clobber staging, integrity tests | Full real-like migrations/rollback/security fixtures |
 | History, export, baseline comparisons | PARTIAL | `history.rs`, `HistoryPanel.tsx` | Large history, reports, cross-OS metadata, GUI |
 | Portable QSettings export | PARTIAL | `scripts/export-studio4-settings.py` | Complete import/session restoration in new GUI |
-| Complete Qt workspace session restoration | MISSING | Dockview layout only saved in localStorage | Persist/reload open tabs and active document safely |
+| Complete Qt workspace session restoration | PARTIAL | `model/session.ts` reopens bounded clean tab paths and active document when user reselects workspace | No automatic last-workspace selection or unsaved source recovery on app restart |
 | Notebook v4 open/create/edit/save/Run all | PARTIAL | `extra_files.rs`, `NotebookPanel.tsx`, `notebook.test.ts` | Qt fixture and installed GUI output/save/reopen |
 | Legacy `execute_result` and numeric-zero notebook return | PARTIAL | `model/notebook.ts`, `NotebookPanel.tsx` + Vitest | Real file-backed UI acceptance |
 | CFG and heuristic call graph | PARTIAL | `model/graphs.ts`, `GraphPanel.tsx`, Cytoscape | Large/complex programs; native AST unavailable |

@@ -26,3 +26,6 @@ walkdir = "2.5"
 
 sysinfo = "=0.38.4"
 time = { version = "0.3", features = ["formatting"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

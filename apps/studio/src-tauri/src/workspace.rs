@@ -1,7 +1,10 @@
 //! Filesystem access is restricted to a user-chosen, canonical workspace.
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs, path::{Component, Path, PathBuf}};
+use std::{fs, path::{Component, Path, PathBuf}, sync::{LazyLock, Mutex}};
+
+/// Prevent two writes in this app process from passing the same optimistic digest check.
+pub(crate) static WORKSPACE_WRITES: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 const MAX_FILE: u64 = 2 * 1024 * 1024;
 const MAX_ENTRIES: usize = 500;
@@ -77,6 +80,7 @@ pub fn read(root: &Path, relative: &str) -> Result<Document, String> {
 }
 
 pub fn save(root: &Path, relative: &str, source: &str, expected: &str) -> Result<Document, String> {
+    let _write_guard = WORKSPACE_WRITES.lock().map_err(|e|e.to_string())?;
     if source.len() as u64 > MAX_FILE { return Err("File exceeds 2 MiB".into()); }
     let path = resolve(root, relative, false)?;
     let old = fs::read(&path).map_err(|e| e.to_string())?;
@@ -121,6 +125,7 @@ pub fn save(root: &Path, relative: &str, source: &str, expected: &str) -> Result
 }
 
 pub fn create(root: &Path, relative: &str) -> Result<Document, String> {
+    let _write_guard = WORKSPACE_WRITES.lock().map_err(|e|e.to_string())?;
     let path = resolve(root, relative, true)?;
     if path.exists() { return Err("File already exists".into()); }
     fs::OpenOptions::new().write(true).create_new(true).open(&path).map_err(|e| e.to_string())?;
@@ -142,6 +147,35 @@ mod tests {
         assert_eq!(read(&root,"program.pm").unwrap().source,"print(0);\n");
         assert!(save(&root,"program.pm","corrupted","incorrect-digest").is_err());
         assert_eq!(read(&root,"program.pm").unwrap().digest,next.digest);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn simultaneous_saves_with_same_digest_do_not_overwrite_each_other() {
+        use std::sync::{Arc,Barrier};
+        let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .unwrap().as_nanos();
+        let root=std::env::temp_dir().join(format!("studio5-save-race-{}-{nonce}",std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let initial=create(&root,"race.pm").unwrap();
+        let barrier=Arc::new(Barrier::new(3));
+        let results:Vec<_>=std::thread::scope(|scope|{
+            let handles:Vec<_>=(0..2).map(|i|{
+                let b=Arc::clone(&barrier);
+                let root=&root;
+                let digest=initial.digest.clone();
+                scope.spawn(move || {
+                    b.wait();
+                    save(root,"race.pm",&format!("print({i});"),&digest)
+                })
+            }).collect();
+            barrier.wait();
+            handles.into_iter().map(|h|h.join().unwrap()).collect()
+        });
+        assert_eq!(results.iter().filter(|r|r.is_ok()).count(),1);
+        assert!(results.iter().any(|r|r.as_ref().err().is_some_and(|s|s.contains("changed on disk"))));
+        let content=read(&root,"race.pm").unwrap().source;
+        assert!(content=="print(0);"||content=="print(1);");
         fs::remove_dir_all(root).unwrap();
     }
 

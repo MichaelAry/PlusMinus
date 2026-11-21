@@ -38,3 +38,19 @@ Target: merged foundation and parity plus PR #21 hardening. The C++20 engine, Qt
 - [ ] Original Qt launch workflow, user studio.db and rollback remain operational.
 
 Decision rule: code merged or CI green alone is not proof of installed GUI parity. Do not switch the default launcher or remove Qt until all applicable acceptance gates pass.
+
+## Stage 3 restricted to Windows/Linux x64
+
+- [ ] Both Windows/Linux original C++ CTest + 225 individual tests + native smoke green on latest commit.
+- [ ] Frontend Vitest/typecheck/lint and Rust check/test/Clippy green on latest commit.
+- [ ] Windows x64 extracted MSI runs bundled runner, lists 225 tests and executes one native case.
+- [ ] Linux x64 extracted deb runs bundled runner/test and starts under X11/Xvfb.
+- [ ] Installed GUI parity and notebook/history/source edits verified on both OS.
+- [ ] Cancellation/timeout and descendant cleanup verified on both OS.
+- [ ] Real nonempty Qt SQLite database migration verified with complete row and baseline comparison.
+- [ ] Same-hardware Qt-vs-Tauri profiling and memory checks completed.
+- [x] Original Qt launcher, C++ source, SQLite user data and rollback kept intact in branch.
+
+**Current decision: NOT READY.** No cutover, no auto-merge and no removal
+of Qt. macOS and ARM64 are outside the user's current acceptance scope.
+See `docs/migration/STAGE3_WINDOWS_LINUX.md`.

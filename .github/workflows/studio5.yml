@@ -8,6 +8,7 @@ on:
       - 'scripts/stage-native.mjs'
       - 'scripts/verify-native-isolation.mjs'
       - 'scripts/smoke-packaged-linux.sh'
+      - 'scripts/smoke-packaged-windows.ps1'
       - 'scripts/check-qt-native-parity.py'
       - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
@@ -22,6 +23,7 @@ on:
       - 'scripts/stage-native.mjs'
       - 'scripts/verify-native-isolation.mjs'
       - 'scripts/smoke-packaged-linux.sh'
+      - 'scripts/smoke-packaged-windows.ps1'
       - 'scripts/check-qt-native-parity.py'
       - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
@@ -170,6 +172,11 @@ jobs:
       - name: Smoke installed-layout Linux sidecars and GUI startup
         if: runner.os == 'Linux'
         run: bash scripts/smoke-packaged-linux.sh
+
+      - name: Smoke Windows MSI-installed native sidecars
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke-packaged-windows.ps1
 
       - name: Verify package output
         shell: bash

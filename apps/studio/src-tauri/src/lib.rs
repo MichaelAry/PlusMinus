@@ -1,4 +1,5 @@
 mod process;
+mod process_tree;
 mod workspace;
 mod native_tests;
 mod history;

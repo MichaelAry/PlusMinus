@@ -1,23 +1,38 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState, type LazyExoticComponent, type ReactElement } from "react";
 import { DockviewReact, themeDark, type DockviewReadyEvent } from "dockview-react";
 import { native } from "./api/native";
 import { parity } from "./api/parity";
 import type { RunMode, TreeEntry } from "./api/contracts";
 import { useStudio } from "./model/studio";
+import { readSession, saveSession } from "./model/session";
 import { hasUnsavedNotebookDrafts, discardWorkspaceNotebooks } from "./model/notebook";
 import { EditorPane } from "./features/editor/EditorPane";
 import { OutputPane } from "./features/output/OutputPane";
 import { TestLab } from "./features/parity/TestLab";
 import { SourceTestsPanel } from "./features/parity/SourceTestsPanel";
-import { HistoryPanel } from "./features/parity/HistoryPanel";
- import { ProfilerPanel } from "./features/parity/ProfilerPanel";
-import { ResourcePanel } from "./features/parity/ResourcePanel";
-import { GraphPanel } from "./features/parity/GraphPanel";
-import { NotebookPanel } from "./features/parity/NotebookPanel";
-import { LanguagePanel } from "./features/parity/LanguagePanel";
-import { GitPanel } from "./features/parity/GitPanel";
+// The chart, graph, notebook and history bundles are downloaded only when their
+// Dockview panel is opened, not on every cold start of the editor.
+const HistoryLazy=lazy(()=>import("./features/parity/HistoryPanel").then(m=>({default:m.HistoryPanel})));
+const ProfilerLazy=lazy(()=>import("./features/parity/ProfilerPanel").then(m=>({default:m.ProfilerPanel})));
+const ResourcesLazy=lazy(()=>import("./features/parity/ResourcePanel").then(m=>({default:m.ResourcePanel})));
+const GraphLazy=lazy(()=>import("./features/parity/GraphPanel").then(m=>({default:m.GraphPanel})));
+const NotebookLazy=lazy(()=>import("./features/parity/NotebookPanel").then(m=>({default:m.NotebookPanel})));
+const LanguageLazy=lazy(()=>import("./features/parity/LanguagePanel").then(m=>({default:m.LanguagePanel})));
+const GitLazy=lazy(()=>import("./features/parity/GitPanel").then(m=>({default:m.GitPanel})));
+const deferred=(Component:LazyExoticComponent<()=>ReactElement>)=>
+  function DeferredPanel(){
+    return <Suspense fallback={<div className="empty-state" role="status">Loading panel…</div>}>
+      <Component/>
+    </Suspense>;
+  };
+const HistoryPanel=deferred(HistoryLazy),ProfilerPanel=deferred(ProfilerLazy);
+const ResourcePanel=deferred(ResourcesLazy),GraphPanel=deferred(GraphLazy);
+const NotebookPanel=deferred(NotebookLazy),LanguagePanel=deferred(LanguageLazy);
+const GitPanel=deferred(GitLazy);
 import "./features/parity/ParityStyle.css";
 
+const MemoDockview=memo(({onReady}:{onReady:(event:DockviewReadyEvent)=>void})=>
+  <DockviewReact components={panels} onReady={onReady} theme={themeDark}/>);
 const panels = {
   editor: EditorPane, results: OutputPane, tests: TestLab, sourcetests: SourceTestsPanel, history: HistoryPanel,
   profiler: ProfilerPanel, resources: ResourcePanel, graphs: GraphPanel, notebook: NotebookPanel,
@@ -51,7 +66,9 @@ export default function App() {
   const started=useStudio(s=>s.started),finished=useStudio(s=>s.finished),setMode=useStudio(s=>s.setMode);
   const active=docs.find(d=>d.id===activeId)??docs[0];
   const dockApi=useRef<DockviewReadyEvent["api"]|null>(null);
-  const fileOpenGeneration=useRef(0);
+  const workspaceGeneration=useRef(0);
+  const focusGeneration=useRef(0);
+  const restoringSession=useRef(false);
   const [engine,setEngine]=useState("Checking C++ runner…");
   const [message,setMessage]=useState("Graphite Research / Studio 5");
   const [busy,setBusy]=useState(false);
@@ -74,16 +91,40 @@ export default function App() {
       !window.confirm("Switch workspace and discard unsaved documents/notebooks?"))return;
     try{
       const folder=await native.chooseWorkspace();
-      fileOpenGeneration.current++;
+      workspaceGeneration.current++;
+      ++focusGeneration.current;
+      const generation=workspaceGeneration.current;
       let tree:TreeEntry[]=[];
       let treeError="";
       try { tree=await native.listWorkspace(); }
       catch(e){treeError=String(e);}
       if(workspace)discardWorkspaceNotebooks(workspace);
+      // Restore only clean on-disk tabs: never silently persist or replay unsaved source.
+      const session=readSession(folder);
+      restoringSession.current=true;
       setWorkspace(folder,tree);
-      setMessage(treeError?"Workspace selected; file listing failed: "+treeError:"Workspace selected: "+folder);
+      try{
+        const loaded=await Promise.allSettled(session.paths.map(async path=>{
+          const doc=path.endsWith(".pm")?await native.openSource(path):await parity.openDocument(path);
+          if(workspaceGeneration.current===generation && useStudio.getState().workspace===folder)
+            open(doc,false);
+        }));
+        if(workspaceGeneration.current===generation && useStudio.getState().workspace===folder){
+          if(session.activePath && useStudio.getState().documents.some(d=>d.id===session.activePath))
+            useStudio.getState().select(session.activePath);
+          const failures=loaded.filter(result=>result.status==="rejected").length;
+          setMessage(failures? `Workspace loaded; ${failures} saved tabs could not be reopened`:
+            treeError?"Workspace selected; file listing failed: "+treeError:"Workspace selected: "+folder);
+        }
+      }finally{
+        restoringSession.current=false;
+        if(workspaceGeneration.current===generation && useStudio.getState().workspace===folder){
+          const state=useStudio.getState();
+          saveSession(folder,state.documents,state.activeId);
+        }
+      }
     }catch(e){setMessage(String(e));}
-  },[setWorkspace,workspace]);
+  },[open,setWorkspace,workspace]);
   const showPanel=useCallback((name:PanelName)=>{
     const api=dockApi.current;if(!api)return;
     const id=name==="editor"?"source-editor":name==="results"?"run-results":"tool-"+name;
@@ -94,7 +135,8 @@ export default function App() {
       position:reference?{referencePanel:reference,direction:name==="tests"?"right":"below"}:undefined});
   },[]);
   const openFile=useCallback(async(path:string,anchor?:string)=>{
-    const requestId=++fileOpenGeneration.current;
+    const generation=workspaceGeneration.current;
+    const focusId=++focusGeneration.current;
     const root=useStudio.getState().workspace;
     if(path.endsWith(".ipynb")){
       sessionStorage.setItem("studio5:open-notebook",path);
@@ -106,10 +148,10 @@ export default function App() {
     if(existing){useStudio.getState().select(existing.id);}
     else try{
       const doc=path.endsWith(".pm")?await native.openSource(path):await parity.openDocument(path);
-      if(fileOpenGeneration.current!==requestId || useStudio.getState().workspace!==root)return;
-      open(doc);setMessage("Opened "+path);
+      if(workspaceGeneration.current!==generation || useStudio.getState().workspace!==root)return;
+      open(doc,focusGeneration.current===focusId);setMessage("Opened "+path);
     }catch(e){
-      if(fileOpenGeneration.current===requestId && useStudio.getState().workspace===root)
+      if(workspaceGeneration.current===generation && useStudio.getState().workspace===root)
         setMessage("Open failed: "+String(e));
       return;
     }
@@ -118,6 +160,11 @@ export default function App() {
       window.dispatchEvent(new CustomEvent("studio:goto-anchor",{detail:{path,anchor}}));
     },50));
   },[open,showPanel]);
+  useEffect(()=>{
+    if(!workspace || restoringSession.current)return;
+    saveSession(workspace,docs,activeId);
+  },[workspace,docs,activeId]);
+
   const saveFile=useCallback(async()=>{
     if(dockApi.current?.activePanel?.id==="tool-notebook"){
       window.dispatchEvent(new Event("studio:save-notebook"));return;
@@ -269,7 +316,7 @@ export default function App() {
         <div className="workspace-header"><span>RESEARCH WORKBENCH</span>
           <span className="workspace-breadcrumb">{active?.path||"Untitled.pm"}</span>
           <span className="workspace-hint">Ctrl+Shift+P / COMMAND PALETTE</span></div>
-        <div className="dock-host"><DockviewReact components={panels} onReady={onDockReady} theme={themeDark}/></div>
+        <div className="dock-host"><MemoDockview onReady={onDockReady}/></div>
       </main>
     </div>
     <footer className="statusbar"><span className="status-indicator">●</span><span>{message}</span>
