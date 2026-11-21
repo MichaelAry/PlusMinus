@@ -3,7 +3,7 @@
 //! and returns exactly one JSON object. This is NOT a JSON-RPC or DAP server.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{path::{Path, PathBuf}, process::Stdio, time::{Duration, Instant}};
+use std::{path::PathBuf, process::Stdio, time::{Duration, Instant}};
 use tauri::{AppHandle, Manager};
 use tokio::{io::{AsyncRead, AsyncReadExt, AsyncWriteExt}, process::Command};
 use tokio_util::sync::CancellationToken;
@@ -64,13 +64,13 @@ pub fn resolve_native(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     if let Ok(resources) = app.path().resource_dir() { roots.push(resources); }
     #[cfg(debug_assertions)]
     {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors().nth(3).ok_or("Cannot find development checkout")?;
         roots.extend([
             repo.join("build/studio5"), repo.join("build/studio5/Release"),
             repo.join("build"), repo.join("build/Release"),
             repo.join("ide/build"), repo.join("ide/build/Release"),
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries"),
         ]);
     }
     for root in roots {

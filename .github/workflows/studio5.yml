@@ -110,7 +110,7 @@ jobs:
         shell: bash
         run: |
           test -d apps/studio/src-tauri/target/release/bundle
-          find apps/studio/src-tauri/target/release/bundle -type f | head -50
+          find apps/studio/src-tauri/target/release/bundle -maxdepth 2 -type f -print
 
       - uses: actions/upload-artifact@v4
         with:
