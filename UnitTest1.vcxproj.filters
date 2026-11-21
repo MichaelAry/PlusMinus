@@ -51,6 +51,9 @@
     <ClCompile Include="src\vm\vm.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\vm\builtins.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\vm\executor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

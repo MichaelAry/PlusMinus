@@ -168,6 +168,7 @@
     <ClCompile Include="src\compiler\expressions.cpp" />
     <ClCompile Include="src\vm\vm.cpp" />
     <ClCompile Include="src\vm\executor.cpp" />
+    <ClCompile Include="src\vm\builtins.cpp" />
     <ClCompile Include="src\api.cpp" />
     <ClCompile Include="tests\cpp\arithmetic_tests.cpp" />
     <ClCompile Include="tests\cpp\control_flow_tests.cpp" />
