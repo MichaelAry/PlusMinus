@@ -138,13 +138,13 @@ class ResearchController:
         commands = [
             ("File: Open source / notebook", host.open_file),
             ("File: New PlusMinus source", host.new_file),
-            ("File: Save source", host.save_file),
+            ("File: Save active document", host.save_active),
             ("Notebook: New document", lambda: (self.activate("Notebooks"), host.notebooks.new_file())),
             ("Notebook: Run all cells (isolated)", lambda: (self.activate("Notebooks"), host.notebooks.run_all())),
             ("Build: Rebuild C++ interpreter", host.rebuild_language),
-            ("Run: Current PlusMinus source", lambda: host.launch("run")),
-            ("Run: Profile current source", lambda: host.launch("run", profile=True)),
-            ("Run: Record VM trace", lambda: host.launch("trace")),
+            ("Run: Current document", lambda: host.run_active("run")),
+            ("Run: Profile current source", lambda: host.run_active("run", profile=True)),
+            ("Run: Record VM trace", lambda: host.run_active("trace")),
             ("Tests: Run quick C++ suite", lambda: host.start_native_tests("quick")),
             ("Tests: Run all C++ methods", lambda: host.start_native_tests("full")),
             ("Tests: Compare baseline", host.compare_native_baseline),
@@ -254,9 +254,9 @@ def build_research_shell(host, root):
     bar.addWidget(brand)
     bar.addStretch(1)
     bar.addWidget(_button("Open", host.open_file))
-    bar.addWidget(_button("Save", host.save_file))
-    bar.addWidget(_button("Run  F5", lambda: host.launch("run"), True))
-    bar.addWidget(_button("Trace  F7", lambda: host.launch("trace")))
+    bar.addWidget(_button("Save", host.save_active))
+    bar.addWidget(_button("Run  F5", lambda: host.run_active("run"), True))
+    bar.addWidget(_button("Trace  F7", lambda: host.run_active("trace")))
     bar.addWidget(_button("Native tests", lambda: host.start_native_tests("quick")))
     bar.addWidget(_button("Stop", host.stop))
     palette_btn = _button("⌕  Commands")
@@ -354,10 +354,10 @@ def build_research_shell(host, root):
     host.workspace.pageActivated.connect(host.nav.setCurrentRow)
     palette_btn.clicked.connect(controller.palette)
     for keys, callback in [
-        ("F5", lambda: host.launch("run")),
-        ("F6", lambda: host.launch("run", profile=True)),
-        ("F7", lambda: host.launch("trace")),
-        ("Ctrl+S", host.save_file),
+        ("F5", lambda: host.run_active("run")),
+        ("F6", lambda: host.run_active("run", profile=True)),
+        ("F7", lambda: host.run_active("trace")),
+        ("Ctrl+S", host.save_active),
         ("Ctrl+O", host.open_file),
         ("Ctrl+N", host.new_file),
         ("Ctrl+F", host.find_in_file),
