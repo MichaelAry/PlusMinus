@@ -1987,8 +1987,9 @@ def main():
         probe.show()
         app.processEvents()
         startup_mark("main: minimal Qt widget displayed")
-        QTimer.singleShot(350, app.quit)
-        return app.exec()
+        probe.hide()
+        app.processEvents()
+        return 0
     try:
         startup_mark("main: constructing Studio window")
         window = Studio()
@@ -1998,7 +1999,13 @@ def main():
         app.processEvents()
         startup_mark("main: initial Qt events processed")
         if '--gui-smoke' in sys.argv:
-            QTimer.singleShot(600, app.quit)
+            # Native QWidget.show() + initial paint/layout events have already
+            # succeeded. Do not depend on a hosted CI runner's interactive
+            # desktop session to drive QApplication.exec() and a timer.
+            startup_mark("main: GUI smoke rendered successfully")
+            window.hide()
+            app.processEvents()
+            return 0
         startup_mark("main: entering Qt event loop")
         result = app.exec()
         startup_mark(f"main: Qt event loop exited with code {result}")
