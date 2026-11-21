@@ -31,12 +31,13 @@ impl<T> Pipe for T {}
 
 fn safe_path(root:&Path,relative:&str,create:bool)->Result<PathBuf,String>{
  category(relative)?;
- let p=root.join(relative);
+ let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
+ let p=canonical_root.join(relative);
  let parent=p.parent().ok_or("No file parent")?.canonicalize().map_err(|e|e.to_string())?;
- if !parent.starts_with(root){return Err("Path escapes workspace".into());}
+ if !parent.starts_with(&canonical_root){return Err("Path escapes workspace".into());}
  if p.exists(){
     let actual=p.canonicalize().map_err(|e|e.to_string())?;
-    if !actual.starts_with(root)||!actual.is_file(){return Err("File is outside workspace or is not a file".into());}
+    if !actual.starts_with(&canonical_root)||!actual.is_file(){return Err("File is outside workspace or is not a file".into());}
     Ok(actual)
  } else if create {Ok(p)} else {Err("File does not exist".into())}
 }

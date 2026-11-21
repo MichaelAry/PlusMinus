@@ -21,14 +21,17 @@ fn resolve(root: &Path, relative: &str, may_create: bool) -> Result<PathBuf, Str
     if candidate.extension().and_then(|e| e.to_str()) != Some("pm") {
         return Err("Only .pm files can be edited in Stage 1".into());
     }
-    let full = root.join(candidate);
+    // Resolve both paths to the same canonical representation (Windows uses
+    // the verbatim \\?\ prefix for canonical paths).
+    let canonical_root=root.canonicalize().map_err(|e|e.to_string())?;
+    let full = canonical_root.join(candidate);
     let parent = full.parent().ok_or("Missing file parent")?
         .canonicalize().map_err(|e| e.to_string())?;
-    if !parent.starts_with(root) { return Err("Path escapes workspace".into()); }
+    if !parent.starts_with(&canonical_root) { return Err("Path escapes workspace".into()); }
     if !may_create && !full.is_file() { return Err("Source file not found".into()); }
     if full.exists() {
         let actual = full.canonicalize().map_err(|e| e.to_string())?;
-        if !actual.starts_with(root) || !actual.is_file() { return Err("Unsafe file path".into()); }
+        if !actual.starts_with(&canonical_root) || !actual.is_file() { return Err("Unsafe file path".into()); }
         return Ok(actual);
     }
     Ok(full)
