@@ -119,3 +119,5 @@ ctest --test-dir ide/build -C Release --output-on-failure
 ```
 
 The source launcher keeps the original double-click workflow. `Ctrl+click` in Studio 2.0 navigates to the compiler, VM and bytecode source files at their new locations. The Visual Studio native unit tests are grouped under `tests/cpp/` while retaining their original `TEST_CLASS` and `TEST_METHOD` definitions.
+
+The built-in function implementations (`print`, `len`, `resize`, `sin`, `cos`, `pow`, `fact`, `multifact`) reside in `src/vm/builtins.cpp` and can be opened directly from Language Internals. User-defined function dispatch remains in `src/vm/executor.cpp`.
