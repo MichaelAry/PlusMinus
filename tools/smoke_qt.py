@@ -43,6 +43,11 @@ panel.set_cases([
 ])
 panel.set_result({'id':'Math.pass','status':'PASS','elapsed_ms':2.0})
 panel.set_result({'id':'Math.fail','status':'FAIL','elapsed_ms':3.0,'error':'expected mismatch'})
+panel.table.selectRow(0)
+assert panel.table.item(0, 2).text() == 'PASS'
+panel.set_result({'id':'Math.pass','status':'PASS','elapsed_ms':4.5})
+assert panel.table.currentRow() == 0, 'Streaming status must keep table selection'
+assert panel.table.item(0, 3).text() == '4.50', 'Streaming results must update row in place'
 assert [c['id'] for c in panel.nonpassing_cases()] == ['Math.fail']
 panel.status_filter.setCurrentText('FAIL')
 assert [c['id'] for c in panel.filtered_cases()] == ['Math.fail']
@@ -60,7 +65,11 @@ window.research_controller.restore_layout()
 app.processEvents()
 assert explorer.isVisible(), 'Restoring layout must reopen the Activity Bar'
 assert window.test_suites.count() == 3, 'Native C++ inspector tab must be present'
-window.research_controller.activate('Notebooks')
+for mode in ('Develop', 'Test Lab', 'Language Lab', 'Performance',
+             'Source Control', 'Notebooks'):
+    window.research_controller.activate(mode)
+    app.processEvents()
+    assert explorer.isVisible(), f'Activity Bar disappeared in {mode}'
 assert window.nav.currentRow() == 8
 assert len(window.notebooks.cells) >= 1
 assert window.notebooks.snapshot()['nbformat'] == 4
@@ -75,7 +84,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert window.save_active(), 'Save in Notebook mode must save .ipynb'
     first = window.notebooks.cells[0]
     assert first.kind == 'code'
-    window.notebooks.run_cell(first)
+    first.editor.setFocus()
+    window.run_active()  # F5 in notebook mode must not execute a hidden source file.
     deadline = time.monotonic() + 15
     while window.notebooks.worker is not None and time.monotonic() < deadline:
         app.processEvents()
@@ -97,6 +107,11 @@ with tempfile.TemporaryDirectory() as folder:
     reloaded = load_notebook(document)
     assert len(reloaded['cells']) == 3
     assert reloaded['cells'][0]['metadata']['plusminus_run']['ok']
+    assert reloaded['cells'][0]['execution_count'] == 2
+    assert reloaded['cells'][0]['outputs']
+    window.stop()
+    assert window.notebooks.cancel.is_set(), 'Global Stop must interrupt notebook kernel'
+    assert window.cancel.is_set(), 'Global Stop must interrupt source jobs'
 window.nav.setCurrentRow(1)
 # A real output view and detailed native metrics must be visible together.
 window.record = lambda *args: None
@@ -123,6 +138,19 @@ assert window.research_controller.console.isVisible(), 'Failed execution must re
 assert 'synthetic compile error' in window.run_details.toPlainText()
 assert 'Execution failed' in window.output.toPlainText()
 
+# Verify the separate native inspector opens the actual selected C++ method.
+window.test_analysis.set_cases([
+    {'id':'AsyncExecutionExtended.NestedAsync', 'group':'concurrency',
+     'source':'tests/cpp/concurrency_tests.cpp'},
+])
+source_model = window.test_analysis.model
+parent_index = source_model.index(0, 0)
+test_index = source_model.index(0, 0, parent_index)
+window.test_analysis.tree.setCurrentIndex(
+    window.test_analysis.proxy.mapFromSource(test_index))
+app.processEvents()
+assert 'TEST_METHOD(NestedAsync)' in window.test_analysis.source.toPlainText()
+assert 'Assert::' in window.test_analysis.source.toPlainText()
 window.toggle_split_editor()
 assert window.split_pane.isVisible(), 'Split view must open'
 assert window.secondary_editor.document() is window.editor.document(), 'Split must share the live source document'

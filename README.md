@@ -218,3 +218,25 @@ this. No network dependencies or embedded browser are required.
 
 The ordinary source launcher, CMake build, local unit-test history, Windows
 and Unix launch scripts and standalone packaging remain supported.
+
+## Studio 4.0 GUI reliability fixes
+
+The **Explorer and Activity Bar are permanent** (not closable or floatable),
+including after restoring older layouts. Workspace switches no longer
+automatically hide the bottom output dock. Every program run — successful,
+failed, empty stdout or compilation failure — opens **Run / Metrics** with
+actual output and execution measurements side by side. Missing process samples
+are shown as *not measured*, not as zero. The output panel reopens automatically
+when a new run begins. Runtime errors remain visible alongside diagnostics.
+
+Notebook **Shift+Enter / Ctrl+Enter** executes the current cell. After executing
+the last code cell, the editor appends one focused empty code cell; reruns do not
+create duplicates. The global **Run (F5)** and **Save (Ctrl+S)** commands work on
+the active notebook rather than a hidden source editor. Cells store execution
+timings and output using the Jupyter v4 schema; edits warn about stale outputs.
+The global Stop action interrupts notebook executions too. Notebook cells are
+still isolated and do not share persistent VM state.
+
+The Test Laboratory now updates incoming native C++ test results incrementally,
+retains selection, and keeps the source inspector open when running its selected
+method. Headless Qt smoke checks cover these behaviors on Linux, macOS and Windows.
