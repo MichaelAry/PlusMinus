@@ -25,8 +25,6 @@ class NativeTestPanel(QWidget):
             ('Run selected', lambda: self.runRequested.emit('selected')),
             ('Run quick', lambda: self.runRequested.emit('quick')),
             ('Run all 225', lambda: self.runRequested.emit('full')),
-            ('Set baseline', self.baselineRequested.emit),
-            ('Compare', self.compareRequested.emit),
         ):
             b = QPushButton(title)
             b.clicked.connect(action)
@@ -41,7 +39,23 @@ class NativeTestPanel(QWidget):
         self.search.setPlaceholderText('Filter tests by class, name or source...')
         self.search.textChanged.connect(self.populate)
         filters.addWidget(self.search, 1)
+        self.status_filter = QComboBox()
+        self.status_filter.addItems(['All statuses', 'PASS', 'FAIL', 'ERROR', 'TIMEOUT', 'CANCELED', 'NOT RUN'])
+        self.status_filter.currentTextChanged.connect(self.populate)
+        filters.addWidget(self.status_filter)
         layout.addLayout(filters)
+        actions = QHBoxLayout()
+        for title, action in (
+            ('Run filtered', lambda: self.runRequested.emit('filtered')),
+            ('Run failed', lambda: self.runRequested.emit('failed')),
+            ('Set baseline', self.baselineRequested.emit),
+            ('Compare baseline', self.compareRequested.emit),
+        ):
+            control = QPushButton(title)
+            control.clicked.connect(action)
+            actions.addWidget(control)
+        actions.addStretch()
+        layout.addLayout(actions)
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(['Test method', 'Group', 'Status', 'Wall ms', 'Source'])
         self.table.verticalHeader().hide()
@@ -51,6 +65,7 @@ class NativeTestPanel(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.doubleClicked.connect(self.open_selected)
+        self.table.itemSelectionChanged.connect(self.show_selection_details)
         layout.addWidget(self.table, 1)
         self.report = QPlainTextEdit()
         self.report.setReadOnly(True)
@@ -81,14 +96,26 @@ class NativeTestPanel(QWidget):
         self.populate()
         total = len(self.last_results)
         passed = sum(r['status'] == 'PASS' for r in self.last_results.values())
-        self.summary.setText(f'{passed} / {total} checked · {total - passed} not passed')
+        self.summary.setText(
+            f'{passed} PASS · {total - passed} nonpassing · {max(0, len(self.cases) - total)} not run')
 
-    def populate(self, *_):
+    def filtered_cases(self):
         group = self.group_filter.currentText()
         needle = self.search.text().lower()
-        shown = [c for c in self.cases if
-                 (group == 'All groups' or c['group'] == group) and
-                 needle in (c['id']+' '+c['source']).lower()]
+        status = self.status_filter.currentText()
+        return [c for c in self.cases if
+                (group == 'All groups' or c['group'] == group)
+                and needle in (c['id'] + ' ' + c['source']).lower()
+                and (status == 'All statuses' or
+                     self.last_results.get(c['id'], {}).get('status', 'NOT RUN') == status)]
+
+    def nonpassing_cases(self):
+        return [c for c in self.cases if
+                self.last_results.get(c['id'], {}).get('status', 'NOT RUN')
+                in ('FAIL', 'ERROR', 'TIMEOUT', 'CANCELED')]
+
+    def populate(self, *_):
+        shown = self.filtered_cases()
         selected = self.selected()
         previous = selected['id'] if selected else None
         self.table.setRowCount(len(shown))
@@ -105,6 +132,24 @@ class NativeTestPanel(QWidget):
                 self.table.setItem(row, col, item)
             if case['id'] == previous:
                 self.table.selectRow(row)
+
+    def show_selection_details(self):
+        case = self.selected()
+        if not case or case['id'] not in self.last_results:
+            return
+        result = self.last_results[case['id']]
+        fields = [f"{case['id']} · {result.get('status', 'UNKNOWN')}",
+                  f"Wall time: {result.get('elapsed_ms', 0):.3f} ms"]
+        for field, label, unit in (
+            ('test_ms', 'C++ body time', 'ms'),
+            ('cpu_ms', 'CPU time', 'ms'),
+            ('peak_rss_mb', 'Sampled peak RSS', 'MB'),
+        ):
+            if result.get(field) is not None:
+                fields.append(f"{label}: {result[field]:.3f} {unit}")
+        if result.get('error'):
+            fields.append('Failure: ' + result['error'])
+        self.report.setPlainText('\n'.join(fields))
 
     def open_selected(self, *_):
         case = self.selected()
