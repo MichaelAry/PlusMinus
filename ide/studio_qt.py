@@ -32,6 +32,7 @@ from analytics import (BUILTIN_TESTS, HistoryStore, analyze_bytecode, analyze_so
 from engine import execute, find_runner
 from internals import keyword_at, editable_checkout
 from language_window import LanguageSourceWindow
+from workspace import WorkspaceTabs
 
 try:
     import psutil
@@ -407,14 +408,19 @@ class Studio(QMainWindow):
         toolbar_layout.addWidget(button('Language C++', self.open_language_internals))
         toolbar_layout.addWidget(button('Stop', self.stop))
         right_layout.addWidget(toolbar)
-        self.stack = QStackedWidget()
-        for create in (self.make_overview, self.make_editor, self.make_tests,
-                       self.make_profiler, self.make_resources, self.make_benchmarks,
-                       self.make_history):
-            self.stack.addWidget(create())
-        right_layout.addWidget(self.stack, 1)
+        self.stack = WorkspaceTabs()
+        self.workspace = self.stack
+        for title, create in zip(
+                ('Overview', 'Code Editor', 'Test Center', 'Profiler',
+                 'Resources', 'Benchmarks', 'History & Reports'),
+                (self.make_overview, self.make_editor, self.make_tests,
+                 self.make_profiler, self.make_resources, self.make_benchmarks,
+                 self.make_history)):
+            self.workspace.register_page(title, create())
+        right_layout.addWidget(self.workspace, 1)
         outer.addWidget(right, 1)
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.currentRowChanged.connect(self.workspace.open_page)
+        self.workspace.pageActivated.connect(self.nav.setCurrentRow)
         self.nav.setCurrentRow(0)
         for shortcut, action in [('F5', lambda: self.launch('run')),
                                  ('F6', lambda: self.launch('run', profile=True)),
@@ -793,6 +799,9 @@ class Studio(QMainWindow):
         geometry = self.settings.value('geometry')
         if geometry:
             self.restoreGeometry(geometry)
+        pages = self.settings.value('workspace_pages', [0, 1])
+        if isinstance(pages, (list, tuple)):
+            self.workspace.restore_pages(pages)
         filename = self.settings.value('last_file', '')
         if filename and Path(str(filename)).is_file():
             self.read_file(Path(str(filename)))
@@ -1136,6 +1145,7 @@ class Studio(QMainWindow):
                     event.ignore()
                     return
         self.settings.setValue('geometry',self.saveGeometry())
+        self.settings.setValue('workspace_pages',self.workspace.open_page_ids())
         event.accept()
 
 

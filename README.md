@@ -123,3 +123,8 @@ The source launcher keeps the original double-click workflow. `Ctrl+click` in St
 The built-in function implementations (`print`, `len`, `resize`, `sin`, `cos`, `pow`, `fact`, `multifact`) reside in `src/vm/builtins.cpp` and can be opened directly from Language Internals. User-defined function dispatch remains in `src/vm/executor.cpp`.
 
 For source-IDE launches, `launch.py` continues to configure `ide/build` with `cmake -S ide` to preserve existing CMake caches from previous versions. `ide/CMakeLists.txt` is now a compatibility wrapper around the root build; you can also configure the root CMake project separately in `build/` as shown above.
+
+
+## Multi-tab workspace
+
+Every left navigation item opens a separate workspace tab without replacing previous pages. Tabs are movable and individually closable; the open workspace pages are restored on the next launch.

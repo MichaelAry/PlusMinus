@@ -17,7 +17,10 @@ app = QApplication([])
 window = Studio()
 window.show()
 app.processEvents()
-assert window.stack.count() == 7
+assert len(window.workspace.pages) == 7
+window.nav.setCurrentRow(2)
+window.nav.setCurrentRow(1)
+assert window.workspace.count() >= 3, 'Sidebar must retain multiple open pages'
 assert window.editor.toPlainText()
 window.open_language_internals('print')
 app.processEvents()
