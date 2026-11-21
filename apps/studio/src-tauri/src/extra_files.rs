@@ -80,6 +80,7 @@ pub fn open(root:&Path,relative:&str)->Result<TextDocument,String>{
 }
 
 pub fn save(root:&Path,relative:&str,source:&str,expected:&str)->Result<TextDocument,String>{
+ let _write_guard=crate::workspace::WORKSPACE_WRITES.lock().map_err(|e|e.to_string())?;
  let category=category(relative)?;
  if source.len() > (if category=="notebook"{32*1024*1024}else{4*1024*1024}) {
     return Err("Document exceeds size limit".into());
@@ -126,6 +127,7 @@ pub fn save(root:&Path,relative:&str,source:&str,expected:&str)->Result<TextDocu
 }
 
 pub fn create(root:&Path,relative:&str,source:&str)->Result<TextDocument,String>{
+ let _write_guard=crate::workspace::WORKSPACE_WRITES.lock().map_err(|e|e.to_string())?;
  if category(relative)?!="notebook"{return Err("Only notebook creation is supported here".into());}
  let value:Value=serde_json::from_str(source).map_err(|e|e.to_string())?;
  check_notebook(&value)?;
