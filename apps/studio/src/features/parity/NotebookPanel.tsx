@@ -8,9 +8,9 @@ import { freshNotebook, validateNotebook, encodeNotebook, withCell, makeCell, so
   rememberNotebookDraft, recoverNotebookDraft, latestNotebookDraft, discardNotebookDraft,
   type Notebook, type NotebookCell } from "../../model/notebook";
 
-function CodeCell({source,onChange,onRun,selected}:{source:string;onChange:(v:string)=>void;onRun:(next:boolean)=>void;selected:boolean}){
+function CodeCell({source,onChange,onRun,onSave,selected}:{source:string;onChange:(v:string)=>void;onRun:(next:boolean)=>void;onSave:()=>void;selected:boolean}){
   const host=useRef<HTMLDivElement>(null),editor=useRef<monaco.editor.IStandaloneCodeEditor|null>(null);
-  const callbacks=useRef({onChange,onRun});callbacks.current={onChange,onRun};
+  const callbacks=useRef({onChange,onRun,onSave});callbacks.current={onChange,onRun,onSave};
   useEffect(()=>{
     if(!host.current)return;
     const e=monaco.editor.create(host.current,{
@@ -22,6 +22,8 @@ function CodeCell({source,onChange,onRun,selected}:{source:string;onChange:(v:st
     const subscription=e.onDidChangeModelContent(()=>callbacks.current.onChange(e.getValue()));
     e.addCommand(monaco.KeyMod.Shift|monaco.KeyCode.Enter,()=>callbacks.current.onRun(true));
     e.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.Enter,()=>callbacks.current.onRun(false));
+    // Monaco may consume Ctrl+S before the window-level shortcut receives it.
+    e.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS,()=>callbacks.current.onSave());
     return()=>{subscription.dispose();e.dispose();editor.current=null;};
   },[]);
   useEffect(()=>{
@@ -106,11 +108,13 @@ export function NotebookPanel(){
   const create=async()=>{
     if(!workspace){setError("Choose workspace first");return;}
     if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
+    const discardPrevious=Boolean(dirty&&workspace&&path);
     const name=window.prompt("New notebook (.ipynb)", "research.ipynb");
     if(!name)return;
     try{
       const doc=await parity.createNotebook(name,encodeNotebook(freshNotebook()));
       const parsed=validateNotebook(JSON.parse(doc.source));
+      if(discardPrevious)discardNotebookDraft(workspace,path);
       setPath(doc.path);setNotebook(parsed);current.current=parsed;setDigest(doc.digest);
       setDirty(false);setError("");setMessage("Created "+doc.path);
       window.dispatchEvent(new Event("studio:refresh-workspace"));
@@ -231,7 +235,7 @@ export function NotebookPanel(){
             </div>
             {cell.cell_type==="code"?
               index===selected?<CodeCell key={cell.id} selected source={value}
-                onChange={s=>replaceSource(index,s)} onRun={n=>void run(index,n)}/>:
+                onChange={s=>replaceSource(index,s)} onRun={n=>void run(index,n)} onSave={()=>void save()}/>:
                 <pre className="notebook-preview" onClick={()=>setSelected(index)}>{value||"(empty code cell)"}</pre>:
               <><textarea aria-label="Markdown cell" className="lab-textarea" value={value}
                 onFocus={()=>setSelected(index)} onChange={e=>replaceSource(index,e.target.value)}/>
