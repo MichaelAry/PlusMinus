@@ -211,6 +211,8 @@ try {
     Log 'Required build/runtime tools are present.'
   }
   if ($Check) {
+    if (Test-Rust) { Log 'Rust MSVC toolchain: OK' }
+    else { Log 'Rust MSVC toolchain: MISSING' }
     if ($missing.Count) { exit 2 }
     exit 0
   }
