@@ -1,4 +1,4 @@
-# PlusMinus Studio 3.0
+# PlusMinus Studio 4.0 — Research Workbench
 
 **A cross-platform desktop IDE and C++ interpreter test laboratory for PlusMinus (C++20).**
 
@@ -184,3 +184,37 @@ F7 runs the C++ VM with a thread-safe, bounded instruction trace (maximum 5,000 
 ## Split source workspace
 
 Click **Split Editor** in Code Editor to open a second live, editable pane beside the source tabs. Use the right-hand file selector to show any currently open source file. Both panes can edit the same underlying Qt document with separate cursors; edits are shared immediately rather than copied. Split mode is saved with the session and can be closed independently. Closing a source document updates the secondary selector to avoid a stale document reference.
+
+
+## Research Workbench 4.0 UI
+
+The Graphite Research shell retains all existing C++ VM and Studio 3 services
+while adding an Activity Bar, movable/dockable **Explorer**, **Inspector**, and
+**Output and Diagnostics** panels, and an accessible command palette
+(`Ctrl+Shift+P`). The Explorer supports opening `.pm`, C++ sources and
+`.ipynb` files from the checkout. The six activity modes (Develop, Test Lab,
+Notebooks, Language Lab, Performance, Source Control) are workspace presets;
+they keep existing document tabs intact. Dock layouts are stored under
+`QSettings('PlusMinus', 'Studio4')`, with migration of Studio2 settings.
+
+### Native C++ Test Analysis
+
+In **Test Lab → C++ Test Analysis**, select a registered method to inspect
+the corresponding C++ source (when available), a clearly labelled lexical
+summary of assertions and interpreter API calls, its last recorded outcome,
+and its SQLite history. **Run method** executes the selected real native test;
+**Compare baseline** uses the existing persisted test sessions. Source coverage
+is displayed as unavailable until instrumentation produces measured data.
+
+### Notebook documents
+
+Open **Notebooks** from the Activity Bar and create/open `.ipynb` files.
+The implementation uses standard nbformat-v4 JSON, code and Markdown cells,
+reordering/removing cells, read-only results, Run Cell, Run All and Interrupt.
+Code cells run **out-of-process in isolated PlusMinus VM processes**. This is
+real execution, but NOT a persistent Jupyter kernel; variables/functions do
+not carry over from one code cell to another. The UI explicitly communicates
+this. No network dependencies or embedded browser are required.
+
+The ordinary source launcher, CMake build, local unit-test history, Windows
+and Unix launch scripts and standalone packaging remain supported.
