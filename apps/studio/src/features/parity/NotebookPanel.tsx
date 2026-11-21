@@ -45,6 +45,7 @@ export function NotebookPanel(){
   const [error,setError]=useState("");
   const [message,setMessage]=useState("");
   const [visibleCount,setVisibleCount]=useState(40);
+  const openRef=useRef<(path:string)=>Promise<void>>(async()=>{});
   const open=async(p:string)=>{
     if(dirty&&!window.confirm("Discard unsaved notebook changes?"))return;
     try {
@@ -54,20 +55,32 @@ export function NotebookPanel(){
       setDigest(doc.digest);setDirty(false);setStale({});setSelected(0);setError("");setMessage("Opened "+p);
     }catch(e){setError(String(e));}
   };
+  openRef.current=open;
   useEffect(() => {
     const handler = (event: Event) => {
       const path=(event as CustomEvent<{path:string}>).detail.path;
-      if(path)void open(path);
+      if(path)void openRef.current(path);
     };
     window.addEventListener("studio:notebook-open",handler);
     const requested=sessionStorage.getItem("studio5:open-notebook");
     if(requested){
       sessionStorage.removeItem("studio5:open-notebook");
-      void open(requested);
+      void openRef.current(requested);
     }
     return()=>window.removeEventListener("studio:notebook-open",handler);
   },[workspace]);
+  useEffect(() => {
+    setNotebook(null);current.current=null;setPath("");setDigest("");setDirty(false);setStale({});setSelected(0);
+  },[workspace]);
 
+  useEffect(()=>{
+    const onSwitch=(event:Event)=>{
+      if(activeJob.current){event.preventDefault();setError("Stop notebook execution before changing workspace");return;}
+      if(dirty&&!window.confirm("Discard unsaved notebook changes?"))event.preventDefault();
+    };
+    window.addEventListener("studio:workspace-switch",onSwitch);
+    return()=>window.removeEventListener("studio:workspace-switch",onSwitch);
+  },[dirty]);
   const update=(next:Notebook)=>{
     current.current=next;setNotebook(next);setDirty(true);
   };

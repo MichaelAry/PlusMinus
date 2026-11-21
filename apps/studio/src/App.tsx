@@ -64,6 +64,7 @@ export default function App() {
     catch(e){setMessage("Workspace: "+String(e));}
   },[setEntries]);
   const chooseWorkspace=useCallback(async()=>{
+    if(!window.dispatchEvent(new Event("studio:workspace-switch",{cancelable:true})))return;
     if(useStudio.getState().documents.some(d=>d.dirty)&&
       !window.confirm("Switch workspace and discard unsaved documents?"))return;
     try{

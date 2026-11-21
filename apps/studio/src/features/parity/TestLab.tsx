@@ -21,6 +21,13 @@ export function TestLab() {
   const jobRef = useRef<string | null>(null);
   const mounted = useRef(true);
 
+  useEffect(()=>{
+    const onSwitch=(event:Event)=>{
+      if(jobRef.current){event.preventDefault();setError("Stop native tests before changing workspace");}
+    };
+    window.addEventListener("studio:workspace-switch",onSwitch);
+    return()=>window.removeEventListener("studio:workspace-switch",onSwitch);
+  },[]);
   const refresh = useCallback(async () => {
     try {
       const [rows, overview] = await Promise.all([parity.listNative(), parity.overview()]);

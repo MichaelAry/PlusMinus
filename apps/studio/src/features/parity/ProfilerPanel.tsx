@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEChart } from "./useEChart";
 import { native } from "../../api/native";
 import { benchmarkStats, freshJobId } from "../../api/parity";
@@ -28,6 +28,13 @@ export function ProfilerPanel() {
     series:[{type:"line",smooth:false,showSymbol:true,data:samples,name:"End-to-end"}],
   }:null);
 
+  useEffect(()=>{
+    const onSwitch=(event:Event)=>{
+      if(busy){event.preventDefault();setError("Stop benchmark before changing workspace");}
+    };
+    window.addEventListener("studio:workspace-switch",onSwitch);
+    return()=>window.removeEventListener("studio:workspace-switch",onSwitch);
+  },[busy]);
   async function benchmark(){
     if(busy||!active||(/\.(cpp|hpp|h)$/.test(active.path)))return;
     setBusy(true);stopRef.current=false;setError("");setSamples([]);setVmSamples([]);

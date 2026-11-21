@@ -34,6 +34,13 @@ export function SourceTestsPanel(){
   const [error,setError]=useState("");
   const job=useRef<string|null>(null),cancel=useRef(false);
   const all=[...builtin,...user];
+  useEffect(()=>{
+    const onSwitch=(event:Event)=>{
+      if(job.current){event.preventDefault();setError("Stop source tests before changing workspace");}
+    };
+    window.addEventListener("studio:workspace-switch",onSwitch);
+    return()=>window.removeEventListener("studio:workspace-switch",onSwitch);
+  },[]);
   const refresh=async()=>{
     try{
       const bundle=await parity.userTests();
