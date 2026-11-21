@@ -42,6 +42,7 @@ from graph_view import GraphView
 from git_view import GitPanel
 from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
+from execution_report import render_output, render_details
 
 try:
     import psutil
@@ -628,6 +629,15 @@ class Studio(QMainWindow):
         results = QTabWidget()
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
+        self.output.setPlaceholderText("Run the current program to see stdout and its return value.")
+        self.run_details = QPlainTextEdit()
+        self.run_details.setReadOnly(True)
+        self.run_details.setPlainText(
+            "Run a program (F5) to see actual C++ compilation, execution and process metrics.")
+        self.run_report_widget = QSplitter(Qt.Orientation.Horizontal)
+        self.run_report_widget.addWidget(self.output)
+        self.run_report_widget.addWidget(self.run_details)
+        self.run_report_widget.setSizes([600, 420])
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
         problems_widget = QWidget()
@@ -641,8 +651,9 @@ class Studio(QMainWindow):
         self.bytecode.setReadOnly(True)
         self.variables = QPlainTextEdit()
         self.variables.setReadOnly(True)
-        for title, widget in [('Output',self.output),('Problems',problems_widget),
-                              ('Bytecode',self.bytecode),('Variables',self.variables)]:
+        for title, widget in [('Run / Metrics', self.run_report_widget),
+                              ('Problems', problems_widget),
+                              ('Bytecode', self.bytecode), ('Variables', self.variables)]:
             results.addTab(widget,title)
         self.result_tabs = results
         if getattr(self, 'research_mode', False):
@@ -843,16 +854,17 @@ class Studio(QMainWindow):
             self.editor.centerCursor()
             self.nav.setCurrentRow(1)
 
-    def spawn(self, work, success, title):
+    def spawn(self, work, success, title, failure=None):
         job = Job(work)
         self.jobs.append(job)
         if hasattr(self, 'task_center'):
             self.task_center.track(job, title)
         job.complete.connect(success)
-        job.failed.connect(lambda text: self.error(f'{title} failed: {text}'))
+        job.failed.connect(failure or (lambda text: self.error(f'{title} failed: {text}')))
         job.finished.connect(lambda j=job: self.finished_job(j))
         self.statusBar().showMessage(f'{title} running in background...')
         job.start()
+        return job
 
     def finished_job(self, job):
         if job in self.jobs:
@@ -1263,18 +1275,64 @@ class Studio(QMainWindow):
         except OSError as exc:
             self.error(f'History database unavailable: {exc}')
 
+    def save_active(self):
+        """Save the currently visible document, not a hidden source tab."""
+        if self.nav.currentRow() == 8 and hasattr(self, 'notebooks'):
+            return self.notebooks.save_file()
+        return self.save_file()
+
+    def run_active(self, mode='run', profile=False):
+        """F5 executes a notebook cell when the notebook workspace is active."""
+        if self.nav.currentRow() == 8 and hasattr(self, 'notebooks'):
+            if mode == 'run' and not profile:
+                self.notebooks.run_focused_cell()
+            else:
+                self.statusBar().showMessage(
+                    'Profiling/trace requires a PlusMinus source file in Develop.', 7000)
+            return
+        self.launch(mode, profile)
+
+    def reveal_run_report(self):
+        """A run must always reveal stdout and metrics, even if a dock was hidden."""
+        self.result_tabs.setCurrentWidget(self.run_report_widget)
+        if hasattr(self, 'research_controller'):
+            dock = self.research_controller.console
+            dock.show()
+            dock.raise_()
+            self.resizeDocks([dock], [255], Qt.Orientation.Vertical)
+
     def launch(self, mode='run', profile=False):
+        title = ('Trace' if mode == 'trace' else 'Profile' if profile else
+                 'Compile' if mode == 'compile' else 'Run')
+        self.reveal_run_report()
         if not self.runner:
-            self.error('C++ runner missing. Launch via Start-PlusMinus or run python launch.py.')
+            message = 'C++ runner missing or stale. Rebuild PlusMinus before executing.'
+            self.output.setPlainText('(No execution performed)')
+            self.run_details.setPlainText(message)
+            self.error(message)
+            return
+        if any(getattr(job, 'task_kind', '') == 'execution' and job.isRunning()
+               for job in self.jobs):
+            self.statusBar().showMessage('A program is already executing. Use Stop first.', 6500)
             return
         source = self.editor.toPlainText()
+        self.output.setPlainText('Executing PlusMinus program…')
+        self.run_details.setPlainText(f'{title} in progress. Waiting for actual C++ runner metrics…')
         self.cancel.clear()
         runner = self.runner
-        self.spawn(lambda: execute(runner,source,'profile' if profile else mode,8.0,self.cancel),
-                   lambda report: self.show_report(report,source,
-                       'Trace' if mode=='trace' else 'Profile' if profile else 'Run'),
-                   'Trace' if mode=='trace' else 'Profile' if profile else
-                   'Compile' if mode=='compile' else 'Run')
+
+        def failed(message):
+            self.error(f'{title} failed: {message}')
+            self.show_report({
+                'ok': False, 'output': '', 'result': '', 'variables': '',
+                'bytecode': '', 'error': str(message), 'ms': 0,
+                'trace': [], 'diagnostics': [], 'metrics': {},
+            }, source, title)
+
+        job = self.spawn(
+            lambda: execute(runner, source, 'profile' if profile else mode, 8.0, self.cancel),
+            lambda report: self.show_report(report, source, title), title, failure=failed)
+        job.task_kind = 'execution'
 
     def trace_step(self, increment):
         self.trace_slider.setValue(self.trace_slider.value() + increment)
@@ -1309,7 +1367,8 @@ class Studio(QMainWindow):
                 self.trace_details.appendPlainText('Trace capped at 5,000 recorded events.')
         else:
             self.trace_details.setPlainText('No recorded trace; press F7 to capture.')
-        self.output.setPlainText(report['output'] + (f"\nReturn: {report['result']}" if report['result'] else ''))
+        self.output.setPlainText(render_output(report))
+        self.run_details.setPlainText(render_details(report, category))
         self.diagnostics.setPlainText(report['error'] or 'Execution successful; no runtime diagnostics.')
         self.present_problems(
             analyze_diagnostics(source) + list(report.get('diagnostics') or []))
@@ -1322,7 +1381,7 @@ class Studio(QMainWindow):
                 + ('Graph truncated to keep UI responsive' if graph['truncated']
                    else 'Complete graph for compiled instructions'))
         self.variables.setPlainText(report['variables'])
-        self.result_tabs.setCurrentIndex(1 if report['error'] else 0)
+        self.result_tabs.setCurrentWidget(self.run_report_widget)
         self.record(category, self.file.name if self.file else 'Editor source', source, report)
         metrics = report.get('metrics', {})
         samples = metrics.get('samples', [])
@@ -1355,6 +1414,7 @@ class Studio(QMainWindow):
         self.statusBar().showMessage(f"{'PASS' if report['ok'] else 'ERROR'}  ·  {report['ms']:.2f} ms",6000)
         self.refresh_history()
         self.nav.setCurrentRow(3 if category in ('Profile','Trace') else 1)
+        self.reveal_run_report()
 
     def stop(self):
         self.cancel.set()
