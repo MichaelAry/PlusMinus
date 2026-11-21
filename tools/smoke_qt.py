@@ -22,6 +22,20 @@ window.nav.setCurrentRow(2)
 window.nav.setCurrentRow(1)
 assert window.workspace.count() >= 3, 'Sidebar must retain multiple open pages'
 assert window.editor.toPlainText()
+from pathlib import Path
+import tempfile
+with tempfile.TemporaryDirectory() as folder:
+    example = Path(folder) / 'windows.pm'
+    example.write_bytes(b'\xef\xbb\xbfprint(1);\r\nprint(2);\r\n')
+    loaded = window.documents.open_path(example)
+    assert not loaded.modified, 'Windows BOM+CRLF file must not be marked dirty'
+    assert window.documents.save_current()
+    assert example.read_bytes().startswith(b'\xef\xbb\xbfprint(1);\r\n')
+
+window.toggle_split_editor()
+assert window.split_pane.isVisible(), 'Split view must open'
+assert window.secondary_editor.document() is window.editor.document(), 'Split must share the live source document'
+window.toggle_split_editor()
 window.new_file()
 assert window.documents.count() >= 2
 window.documents.setCurrentIndex(0)
@@ -36,4 +50,4 @@ window.language_window.close()
 window.saved = window.editor.toPlainText()  # No unsaved-edit dialog in a headless test.
 window.close()
 app.processEvents()
-print('Qt startup, seven analytics views and language source navigation: OK')
+print('Qt startup, eight analytics views, source split and language navigation: OK')

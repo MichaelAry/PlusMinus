@@ -624,6 +624,7 @@ class Studio(QMainWindow):
         toolbar.addWidget(self.file_label)
         toolbar.addStretch()
         toolbar.addWidget(button('New', self.new_file))
+        toolbar.addWidget(button('Split Editor', self.toggle_split_editor))
         toolbar.addWidget(button('Find  Ctrl+F', self.find_in_file))
         toolbar.addWidget(button('Go to line', self.go_to_line))
         toolbar.addWidget(button('Compile', lambda: self.launch('compile')))
@@ -637,8 +638,29 @@ class Studio(QMainWindow):
         self.documents = DocumentTabs(self.make_source_editor)
         self.documents.activated.connect(self.activate_document)
         self.documents.savedFile.connect(lambda path: self.settings.setValue('last_file', path))
+        self.documents.documentsChanged.connect(self.refresh_split_sources)
+        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.editor_splitter.addWidget(self.documents)
+        self.editor_splitter.setChildrenCollapsible(False)
+        self.split_pane = QWidget()
+        split_layout = QVBoxLayout(self.split_pane)
+        split_layout.setContentsMargins(0,0,0,0)
+        split_head = QHBoxLayout()
+        self.split_selector = QComboBox()
+        self.split_selector.currentIndexChanged.connect(self.select_split_document)
+        split_head.addWidget(label('SECOND EDITOR',style='muted'))
+        split_head.addWidget(self.split_selector,1)
+        split_head.addWidget(button('Close split', self.toggle_split_editor))
+        split_layout.addLayout(split_head)
+        self.secondary_editor = CodeEditor()
+        self.secondary_editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.secondary_editor.definitionRequested.connect(self.open_language_internals)
+        split_layout.addWidget(self.secondary_editor,1)
+        self.editor_splitter.addWidget(self.split_pane)
+        self.split_pane.hide()
+        self._split_document = None
         self.documents.new_document(EXAMPLE)
-        edit_layout.addWidget(self.documents)
+        edit_layout.addWidget(self.editor_splitter)
         self.cursor_label = label('Line 1  ·  Column 1',style='muted')
         edit_layout.addWidget(self.cursor_label)
         split.addWidget(edit)
@@ -961,6 +983,52 @@ class Studio(QMainWindow):
         self.start_tests(startup=True)
         self.discover_native()
 
+    def refresh_split_sources(self):
+        if not hasattr(self,'split_selector'):
+            return
+        items = self.documents.all_documents()
+        desired = getattr(self,'_split_document',None)
+        if desired not in items:
+            desired = self.documents.current_document()
+        self.split_selector.blockSignals(True)
+        self.split_selector.clear()
+        for index,doc in enumerate(items):
+            title = doc.path.name if doc.path else f'untitled-{index+1}.pm'
+            self.split_selector.addItem(title)
+        self.split_selector.blockSignals(False)
+        if desired is not None:
+            self._split_document = desired
+            target_index = items.index(desired)
+            self.split_selector.blockSignals(True)
+            self.split_selector.setCurrentIndex(target_index)
+            self.split_selector.blockSignals(False)
+            self.set_secondary_document(desired)
+
+    def set_secondary_document(self, doc):
+        if doc is None:
+            return
+        self._split_document = doc
+        self.secondary_editor.setDocument(doc.editor.document())
+        self.secondary_editor.language = (
+            'cpp' if doc.path and doc.path.suffix.lower() in ('.cpp','.hpp','.h') else 'pm')
+        self.secondary_editor.update_gutter_width(0)
+
+    def select_split_document(self, index):
+        items = self.documents.all_documents()
+        if 0 <= index < len(items):
+            self.set_secondary_document(items[index])
+
+    def toggle_split_editor(self):
+        if self.split_pane.isVisible():
+            self.split_pane.hide()
+            self.statusBar().showMessage('Split editor closed',2000)
+            return
+        self._split_document = self.documents.current_document()
+        self.refresh_split_sources()
+        self.split_pane.show()
+        self.editor_splitter.setSizes([620,540])
+        self.statusBar().showMessage('Split editor: select any open file on the right',3000)
+
     def make_source_editor(self):
         editor = CodeEditor()
         editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -1088,6 +1156,8 @@ class Studio(QMainWindow):
             self.editor.setFocus()
 
     def update_cursor(self):
+        if not hasattr(self, 'cursor_label'):
+            return
         cursor = self.editor.textCursor()
         self.cursor_label.setText(f'Line {cursor.blockNumber()+1}  ·  Column {cursor.positionInBlock()+1}')
 
@@ -1170,6 +1240,8 @@ class Studio(QMainWindow):
             filename = self.settings.value('last_file','')
             if filename and Path(str(filename)).is_file():
                 self.read_file(Path(str(filename)))
+        if str(self.settings.value('split_editor','false')).lower() in ('true','1'):
+            self.toggle_split_editor()
         self.update_analysis()
 
     def record(self, category, label_text, source, report):
@@ -1684,6 +1756,7 @@ class Studio(QMainWindow):
         self.settings.setValue('geometry',self.saveGeometry())
         self.settings.setValue('workspace_pages',self.workspace.open_page_ids())
         self.settings.setValue('open_files',self.documents.open_paths())
+        self.settings.setValue('split_editor',self.split_pane.isVisible())
         event.accept()
 
 

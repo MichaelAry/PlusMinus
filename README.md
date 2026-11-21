@@ -150,3 +150,7 @@ History & Reports contains separate panes for program runs, C++ testing sessions
 ## Bounded VM trace replay
 
 F7 runs the C++ VM with a thread-safe, bounded instruction trace (maximum 5,000 opcode events). Runtime Profiler has a recorded-step slider and Previous/Next controls; each event displays instruction pointer, opcode, VM thread ordinal and stack depth. Recorded events can be inspected alongside the compiled bytecode. This is *post-execution replay*, not a live source-level debugger: interactive breakpoints, variable snapshots and Step Into/Over/Out are not implemented. Trace capture may affect performance, so normal Run and Profile do not collect step traces. Output includes `trace_truncated` when the bound is reached.
+
+## Split source workspace
+
+Click **Split Editor** in Code Editor to open a second live, editable pane beside the source tabs. Use the right-hand file selector to show any currently open source file. Both panes can edit the same underlying Qt document with separate cursors; edits are shared immediately rather than copied. Split mode is saved with the session and can be closed independently. Closing a source document updates the secondary selector to avoid a stale document reference.
