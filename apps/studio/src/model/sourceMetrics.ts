@@ -55,7 +55,7 @@ export function analyzeSource(source:string):SourceMetrics{
   const code_lines=masked.split("\n").filter(x=>x.trim().length>0).length;
   if(code_lines>=300)warnings.push("Large source file: consider extracting functions");
   return {
-    lines:source.split(/\r?\n/).length,code_lines,comments,
+    lines:source.length ? source.replace(/\r?\n$/,"").split(/\r?\n/).length : 0,code_lines,comments,
     functions:count("func"),procedures:count("proc"),function_names,
     variables:variables.size,branches:count("if"),loops:count("while"),
     go_calls:count("go"),sync:count("sync"),locks:count("lock"),

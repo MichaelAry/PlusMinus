@@ -5,5 +5,6 @@ describe("benchmark statistics",()=>{
     expect(benchmarkStats([3,1,2])?.median).toBe(2);
     expect(benchmarkStats([3,1,2])?.mean).toBe(2);
     expect(benchmarkStats([])).toBeNull();
+    expect(benchmarkStats([1,2,3])?.p95).toBeCloseTo(2.9,8);
   });
 });

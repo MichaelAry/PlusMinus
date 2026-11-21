@@ -19,6 +19,7 @@ export function TestLab() {
   const [comparison, setComparison] = useState<SessionDiff | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const jobRef = useRef<string | null>(null);
+  const recoveredSession=useRef<number|null>(null);
   const mounted = useRef(true);
 
   useEffect(()=>{
@@ -39,6 +40,39 @@ export function TestLab() {
     void refresh();
     return () => { mounted.current = false; };
   }, [refresh]);
+
+  // Native tasks outlive Dockview panels. Recover their progress from the
+  // Rust TaskRegistry and reload completed results from SQLite.
+  useEffect(() => {
+    let alive=true;
+    const sync=async()=>{
+      try {
+        const snapshots=await parity.tasks();
+        if(!alive)return;
+        const latest=snapshots.find(t=>t.kind==="native-tests");
+        if(!latest)return;
+        if(latest.status==="running"||latest.status==="cancel_requested"){
+          jobRef.current=latest.job_id;
+          setRunning(latest.job_id);
+          setProgress({done:latest.done,total:latest.total});
+        }else{
+          if(jobRef.current===latest.job_id){jobRef.current=null;setRunning(null);}
+          setProgress({done:latest.done,total:latest.total});
+          if(latest.session_id && recoveredSession.current!==latest.session_id){
+            recoveredSession.current=latest.session_id;
+            const saved=await parity.results(latest.session_id);
+            if(alive){
+              setSessionId(latest.session_id);
+              setResults(old=>({...old,...Object.fromEntries(saved.map(item=>[item.id,item]))}));
+            }
+          }
+        }
+      }catch(e){if(alive)setError(String(e));}
+    };
+    void sync();
+    const interval=setInterval(()=>void sync(),1500);
+    return()=>{alive=false;clearInterval(interval);};
+  },[]);
 
   const groups = useMemo(() => ["All groups", ...new Set(tests.map(t => t.group))], [tests]);
   const visible = useMemo(() => tests.filter(t => {

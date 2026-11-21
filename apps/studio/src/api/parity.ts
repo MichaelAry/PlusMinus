@@ -8,7 +8,9 @@ export interface NativeCase {
   slow: boolean;
 }
 export type NativeStatus = "PASS" | "FAIL" | "ERROR" | "TIMEOUT" | "CANCELED";
-export interface NativeResult extends NativeCase {
+export interface NativeResult extends Omit<NativeCase, "slow"> {
+  // Existing Qt native_results rows do not store the slow flag.
+  slow?: boolean;
   status: NativeStatus;
   error: string;
   elapsed_ms: number;
@@ -71,7 +73,15 @@ export interface UserBundle {cases:UserCase[];revision:string}
 export interface ResourceSnapshot {
   process:string;pid:number;rss_mb:number;cpu_percent:number|null;
 }
+export interface TaskSnapshot {
+  job_id: string; kind: string;
+  status: "running" | "cancel_requested" | "completed" | "canceled" | "error";
+  done: number; total: number; passed: number; failed: number;
+  session_id: number | null; error: string | null; created_at_ms: number;
+}
 export const parity = {
+  tasks: () => invoke<TaskSnapshot[]>("list_tasks"),
+  task: (jobId:string) => invoke<TaskSnapshot | null>("task_snapshot",{jobId}),
   resources:()=>invoke<ResourceSnapshot>("resource_snapshot"),
   userTests:()=>invoke<UserBundle>("list_user_tests"),
   saveUserTests:(cases:UserCase[],expected:string)=>invoke<UserBundle>("save_user_tests",{cases,expected}),
@@ -107,7 +117,11 @@ export function benchmarkStats(samples: number[]) {
   const sorted = [...samples].sort((a,b) => a-b);
   const average = sorted.reduce((sum,v) => sum+v,0)/sorted.length;
   const median = sorted[Math.floor((sorted.length-1)*0.5)];
-  const p95 = sorted[Math.ceil(sorted.length*0.95)-1];
+  // Match Studio 4's interpolated percentile, not nearest-rank.
+  const pos = (sorted.length-1) * .95;
+  const lo = Math.floor(pos);
+  const hi = Math.min(lo+1, sorted.length-1);
+  const p95 = sorted[lo]*(hi-pos) + sorted[hi]*(pos-lo);
   const variance = sorted.reduce((sum,v) => sum+(v-average)**2,0)/(sorted.length>1?sorted.length-1:1);
   return { count:samples.length,mean:average,median,p95,min:sorted[0],max:sorted.at(-1)!,stdev:Math.sqrt(variance) };
 }

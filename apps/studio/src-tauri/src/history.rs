@@ -204,22 +204,24 @@ fn git_metadata(root: Option<&Path>) -> (String, bool) {
 
 fn source_fingerprint(root: Option<&Path>) -> String {
     let Some(root)=root else { return "unavailable".into() };
-    let mut paths=Vec::new();
+    let mut digest=Sha256::new();
+    // Studio 4 orders files lexically *within each parent*, with these
+    // parents kept in declaration order. Reordering them changes baselines.
     for folder in ["src","include","tests/cpp","tests/portable"] {
         let base=root.join(folder);
         if !base.is_dir() { continue; }
-        for item in walkdir::WalkDir::new(base).follow_links(false)
-            .into_iter().filter_map(Result::ok).filter(|e|e.file_type().is_file()) {
-            let p=item.path().to_path_buf();
-            if matches!(p.extension().and_then(|x|x.to_str()),Some("cpp"|"hpp"|"h")) { paths.push(p); }
-        }
-    }
-    paths.sort();
-    let mut digest=Sha256::new();
-    for p in paths {
-        if let (Ok(rel), Ok(data))=(p.strip_prefix(root),fs::read(&p)) {
-            digest.update(rel.to_string_lossy().replace('\\',"/").as_bytes());
-            digest.update(data);
+        let mut paths:Vec<_> = walkdir::WalkDir::new(base).follow_links(false)
+            .into_iter().filter_map(Result::ok).filter(|e|e.file_type().is_file())
+            .map(|e|e.into_path())
+            .filter(|p|matches!(p.extension().and_then(|x|x.to_str()),Some("cpp"|"hpp"|"h")))
+            .collect();
+        paths.sort();
+        for p in paths {
+            if let (Ok(rel), Ok(data))=(p.strip_prefix(root),fs::read(&p)) {
+                // Preserve host separators, matching Python Path.__str__.
+                digest.update(rel.to_string_lossy().as_bytes());
+                digest.update(data);
+            }
         }
     }
     format!("{:x}",digest.finalize())[..16].to_string()
