@@ -94,3 +94,20 @@ UTF-8 stdin until EOF, no JSON-RPC; \`plusminus_native_tests\` consumes argv
 ## Pre-cutover C++ build and worker contract
 
 Native sidecars are staged with a source-fingerprint.json manifest (SHA256 of source/header/test/compiler build inputs). If a selected PlusMinus checkout differs from the embedded fingerprint, native execution and test discovery are blocked until the checkout is rebuilt. Sources are fingerprinted before and after CMake rebuild; a concurrent edit invalidates the result. The historical Qt session source_hash remains separate. All concurrently started native suites share a global two-permit Tokio semaphore. Each process streams bounded stdout/stderr before exit; cancellation is best-effort child termination, not a full process-tree sandbox. The C++ one-shot runner accepts exit 0/ok=true or exit 1/ok=false only, never exit 2 as a valid language diagnostic.
+
+
+## PR #22 response extension and strict validation
+
+`run_source` returns `{job_id,report,exit_code,wall_ms,stderr,history_error}`.
+`report` is the original unmodified C++ JSON object; `stderr` is a bounded
+UTF-8-lossy decoded string from the child stderr pipe, not part of that JSON.
+`history_error` is a nullable string: `null` means history was persisted;
+a string means execution finished but saving into `studio-v5.db` failed.
+The frontend must show this warning without turning a successful VM execution
+into a native compile/runtime error. Malformed diagnostic fields, trace entries,
+trace_truncated, missing/null-incompatible nested metrics, excess trace length,
+and contradictory exit codes are rejected as protocol errors. Valid metric `0`
+and explicitly missing `null` values are preserved.
+
+The C++ runner still takes one argv mode and UTF-8 stdin ending with EOF;
+no JSON-RPC, debugger or persistent notebook kernel is introduced.

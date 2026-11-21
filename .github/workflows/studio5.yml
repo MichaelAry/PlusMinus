@@ -122,11 +122,16 @@ jobs:
         run: |
           npm run test
           npm run typecheck
+          npm run lint:types
           npm run build:ui
 
-      - name: Rust unit tests
+      - name: Rust typecheck, unit tests and Clippy
         working-directory: apps/studio/src-tauri
-        run: cargo test
+        shell: bash
+        run: |
+          cargo check --all-targets
+          cargo test
+          cargo clippy --all-targets
 
       - name: Tauri package (Windows and Linux)
         if: runner.os != 'macOS'

@@ -48,3 +48,15 @@ measure UI responsiveness or installed launch success.
 ## Automated pre-cutover startup validation
 
 PR #21 adds scripts/smoke-packaged-linux.sh to inspect the actual packaged .deb layout, execute embedded C++ runner and test sidecars and smoke the Linux GUI process under Xvfb for eight seconds. This is NOT an end-to-end GUI interaction or performance benchmark. A distinct script executes 225 C++ tests each in its own process in CI. Cross-OS installed performance measurements remain required in Stage 3.
+
+
+## PR #22 additional regression methodology — not measured
+
+Run `npm run lint:types && npm run test && npm run typecheck` under
+`apps/studio/`; run `cargo check --all-targets && cargo test &&
+cargo clippy --all-targets` under `apps/studio/src-tauri/` after staging
+the unchanged C++ sidecars. On each platform, also execute
+`node scripts/verify-native-isolation.mjs --build-dir build/studio5`
+and the original CTest suite. These are *correctness* checks, not comparative
+performance measurements. No new CPU/RSS, startup, editor-latency or Qt/Tauri
+benchmark values have been obtained in this session.

@@ -63,3 +63,23 @@ An interactive, virtualized post-execution trace replay preserves the native 500
 ## Pre-cutover hardening
 
 PR #21 addresses notebook legacy cell IDs, dirty panel drafts, active notebook Save, globally bounded native tests, capped streams, exact IPC exit codes, Qt-compatible SQLite metadata, C++ build-source hash manifests and cross-OS verification of all 225 native C++ tests. Automated test presence does not establish installed desktop parity. See PRE_CUTOVER_VERIFICATION.md.
+
+
+## PR #22 verification update (pending CI)
+
+- **Notebook execute_result / numeric zero:** code corrected and Vitest fixtures added; PARTIAL
+  until successful CI and installed editor/cell/save/reopen interaction.
+- **Runner protocol and stderr:** bounded raw stderr now propagated as additional typed IPC
+  metadata while the C++ JSON response remains unchanged; nested diagnostic/trace/metric
+  validation has Rust unit tests. PARTIAL until CI and packaged IPC smoke pass.
+- **History integrity and schema version:** failed writes are exposed to the Results panel;
+  future schema versions are rejected, and staging upgrades occur in a temporary SQLite
+  database before publication. PARTIAL until three-OS fixtures pass and real user-like
+  migrations are reviewed.
+- **Cancellation accounting:** canceled incomplete source jobs are not recorded as failed;
+  cancellation regression is tested against the unchanged native child where staging exists.
+  PARTIAL pending platform tests and full process-tree cleanup.
+- **TypeScript unused-variable checks and Rust check/test/clippy:** added to Stage 2 workflow.
+  No claim of PASS until GitHub Actions checks finish.
+- **Full GUI parity, system-wide process tree cleanup, ARM64, performance comparison:**
+  remain PARTIAL/NOT VERIFIED; no unsupported VM debugger or kernel is manufactured.
