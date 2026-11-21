@@ -1023,6 +1023,7 @@ class Studio(QMainWindow):
             self.split_pane.hide()
             self.statusBar().showMessage('Split editor closed',2000)
             return
+        self._split_document = self.documents.current_document()
         self.refresh_split_sources()
         self.split_pane.show()
         self.editor_splitter.setSizes([620,540])
@@ -1155,6 +1156,8 @@ class Studio(QMainWindow):
             self.editor.setFocus()
 
     def update_cursor(self):
+        if not hasattr(self, 'cursor_label'):
+            return
         cursor = self.editor.textCursor()
         self.cursor_label.setText(f'Line {cursor.blockNumber()+1}  ·  Column {cursor.positionInBlock()+1}')
 

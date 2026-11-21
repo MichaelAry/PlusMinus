@@ -50,4 +50,4 @@ window.language_window.close()
 window.saved = window.editor.toPlainText()  # No unsaved-edit dialog in a headless test.
 window.close()
 app.processEvents()
-print('Qt startup, seven analytics views and language source navigation: OK')
+print('Qt startup, eight analytics views, source split and language navigation: OK')
