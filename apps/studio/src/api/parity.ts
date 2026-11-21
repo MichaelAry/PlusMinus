@@ -80,6 +80,7 @@ export interface TaskSnapshot {
   session_id: number | null; error: string | null; created_at_ms: number;
 }
 export const parity = {
+  exportHistory:(format:"csv"|"json")=>invoke<string>("export_history",{format}),
   tasks: () => invoke<TaskSnapshot[]>("list_tasks"),
   task: (jobId:string) => invoke<TaskSnapshot | null>("task_snapshot",{jobId}),
   resources:()=>invoke<ResourceSnapshot>("resource_snapshot"),

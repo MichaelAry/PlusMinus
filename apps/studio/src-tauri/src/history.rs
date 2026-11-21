@@ -4,7 +4,7 @@ use rusqlite::{backup::Backup, params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{fs, io::Write, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativeResult {
@@ -190,6 +190,80 @@ pub fn recent_runs(limit: i64) -> Result<Value, String> {
     rows.collect::<rusqlite::Result<Vec<_>>>().map(|x| json!(x)).map_err(|e| e.to_string())
 }
 
+
+/// Escape CSV for spreadsheet viewers; prefix Excel formula-like values with
+/// an apostrophe, while preserving exact original data in SQLite and JSON.
+fn csv_cell(value: &str) -> String {
+    let safe = if value.starts_with(['=','+','-','@','\t','\r']) {
+        format!("'{}",value)
+    } else {
+        value.to_owned()
+    };
+    format!("\"{}\"",safe.replace('"',"\"\""))
+}
+
+fn export_query(db: &Connection, writer: &mut impl Write, format: &str) -> Result<usize,String> {
+    if format!="json" && format!="csv" {return Err("Export format must be csv or json".into());}
+    let mut query=db.prepare(
+      "SELECT id,created,category,label,ok,elapsed_ms,source_hash,details FROM runs ORDER BY id DESC"
+    ).map_err(|e|e.to_string())?;
+    let mut rows=query.query([]).map_err(|e|e.to_string())?;
+    if format=="csv" {
+        writer.write_all(b"id,created,category,label,ok,elapsed_ms,source_hash,details\n")
+            .map_err(|e|e.to_string())?;
+    } else {
+        writer.write_all(b"[\n").map_err(|e|e.to_string())?;
+    }
+    let mut count=0usize;
+    while let Some(r)=rows.next().map_err(|e|e.to_string())? {
+        let id:i64=r.get(0).map_err(|e|e.to_string())?;
+        let created:String=r.get(1).map_err(|e|e.to_string())?;
+        let category:String=r.get(2).map_err(|e|e.to_string())?;
+        let label:String=r.get(3).map_err(|e|e.to_string())?;
+        let ok:i64=r.get(4).map_err(|e|e.to_string())?;
+        let elapsed:f64=r.get(5).map_err(|e|e.to_string())?;
+        let source_hash:String=r.get(6).map_err(|e|e.to_string())?;
+        let details:String=r.get(7).map_err(|e|e.to_string())?;
+        if format=="csv" {
+            let values=[id.to_string(),created,category,label,(ok!=0).to_string(),
+                elapsed.to_string(),source_hash,details];
+            writer.write_all(values.iter().map(|s|csv_cell(s)).collect::<Vec<_>>().join(",").as_bytes())
+                .map_err(|e|e.to_string())?;
+            writer.write_all(b"\n").map_err(|e|e.to_string())?;
+        } else {
+            if count>0 {writer.write_all(b",\n").map_err(|e|e.to_string())?;}
+            let value=json!({
+                "id":id,"created":created,"category":category,"label":label,
+                "ok":ok!=0,"elapsed_ms":elapsed,"source_hash":source_hash,
+                "details":serde_json::from_str::<Value>(&details).unwrap_or(Value::String(details))
+            });
+            serde_json::to_writer(&mut *writer,&value).map_err(|e|e.to_string())?;
+        }
+        count+=1;
+    }
+    if format=="json"{writer.write_all(b"\n]\n").map_err(|e|e.to_string())?;}
+    Ok(count)
+}
+
+/// Export every historical run in a separate user-selected new file, never
+/// writing or updating the original Studio 4 database.
+pub fn export_runs_to(path: &Path, format: &str) -> Result<usize,String> {
+    if format!="json"&&format!="csv"{return Err("Unsupported history export format".into());}
+    let db=connect()?;
+    let file=fs::OpenOptions::new().create_new(true).write(true).open(path)
+        .map_err(|e|format!("Export destination must not exist: {e}"))?;
+    let mut output=std::io::BufWriter::new(file);
+    let result=export_query(&db,&mut output,format)
+        .and_then(|count| {
+            output.flush().map_err(|e|e.to_string())?;
+            output.get_ref().sync_all().map_err(|e|e.to_string())?;
+            Ok(count)
+        });
+    drop(output);
+    if result.is_err(){let _=fs::remove_file(path);}
+    result
+}
+
 fn git_metadata(root: Option<&Path>) -> (String, bool) {
     let Some(root) = root else { return ("unversioned".into(), false) };
     let call = |args: &[&str]| std::process::Command::new("git")
@@ -336,6 +410,25 @@ pub fn compare(base_id:i64,current_id:i64)->Result<Value,String>{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn history_reports_stream_all_rows_without_losing_json(){
+        let db=Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runs (
+            id INTEGER PRIMARY KEY,created TEXT,category TEXT,label TEXT,ok INTEGER,
+            elapsed_ms REAL,source_hash TEXT,details TEXT);
+            INSERT INTO runs VALUES (1,'2026-01-01','Run','=alert',1,2.5,'abc','{\"value\":0}');
+            INSERT INTO runs VALUES (2,'2026-01-02','Run','second',0,3.5,'def','{}');").unwrap();
+        let mut json_bytes=Vec::new();
+        let n=export_query(&db,&mut json_bytes,"json").unwrap();
+        let value:Value=serde_json::from_slice(&json_bytes).unwrap();
+        assert_eq!(n,2);
+        assert_eq!(value[1]["details"]["value"],0);
+        let mut csv_bytes=Vec::new();
+        assert_eq!(export_query(&db,&mut csv_bytes,"csv").unwrap(),2);
+        let csv=String::from_utf8(csv_bytes).unwrap();
+        assert!(csv.contains("'=alert"));
+        assert!(csv.starts_with("id,created,category"));
+    }
+
     #[test] fn unsupported_table_name_rejected(){
         let db=Connection::open_in_memory().unwrap();
         assert!(count_table(&db,"made_up").is_err());

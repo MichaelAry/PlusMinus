@@ -248,6 +248,20 @@ fn list_tasks(state:State<'_,StudioState>)->Result<Vec<tasks::TaskSnapshot>,Stri
     state.tasks.list()
 }
 
+#[tauri::command]
+async fn export_history(app:AppHandle,format:String)->Result<String,String>{
+    if format!="json" && format!="csv"{return Err("Choose json or csv".into());}
+    let file_format=format.clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let extension=if file_format=="csv"{"csv"}else{"json"};
+        let selected=app.dialog().file().add_filter("History",&[extension])
+            .blocking_save_file().ok_or("Export cancelled")?
+            .into_path().map_err(|e|e.to_string())?;
+        let count=history::export_runs_to(&selected,&file_format)?;
+        Ok(format!("Exported {count} runs to {}",selected.display()))
+    }).await.map_err(|e|e.to_string())?
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -262,7 +276,7 @@ pub fn run() {
             open_workspace_document, save_workspace_document, create_notebook,
             git_summary, language_targets, rebuild_native, native_source_stale,
             list_user_tests, save_user_tests, import_user_tests, export_user_tests,
-            resource_snapshot, task_snapshot, list_tasks
+            resource_snapshot, task_snapshot, list_tasks, export_history
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start PlusMinus Studio 5");

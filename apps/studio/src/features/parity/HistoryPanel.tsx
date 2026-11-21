@@ -10,6 +10,7 @@ export function HistoryPanel() {
   const [active, setActive] = useState<number | null>(null);
   const [diff, setDiff] = useState<SessionDiff | null>(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const parent = useRef<HTMLDivElement>(null);
   const v = useVirtualizer({count:runs.length,getScrollElement:()=>parent.current,estimateSize:()=>33,overscan:7});
   const refresh = useCallback(async () => {
@@ -19,6 +20,10 @@ export function HistoryPanel() {
     } catch(e) {setError(String(e));}
   }, []);
   useEffect(() => {void refresh();},[refresh]);
+  async function exportHistory(format:"csv"|"json") {
+    try {setMessage(await parity.exportHistory(format));setError("");}
+    catch(e){setError(String(e));}
+  }
   async function inspect(id:number) {
     try {setResults(await parity.results(id));setActive(id);setDiff(null);}
     catch(e){setError(String(e));}
@@ -36,8 +41,13 @@ export function HistoryPanel() {
   return <div className="lab-page">
     <header className="lab-heading"><div><small>RESEARCH / STORAGE</small><h2>Execution & Test History</h2>
       <p>Studio 4 SQLite history is copied; the source database remains untouched.</p></div>
-      <button onClick={() => void refresh()}>Refresh</button></header>
+      <div className="lab-actions">
+        <button onClick={() => void refresh()}>Refresh</button>
+        <button onClick={() => void exportHistory("csv")}>Export CSV</button>
+        <button onClick={() => void exportHistory("json")}>Export JSON</button>
+      </div></header>
     {error && <div role="alert" className="lab-error">{error}</div>}
+    {message && <p className="lab-muted">{message}</p>}
     <div className="metrics-grid">{Object.entries(overview?.counts ?? {}).map(([key,value]) =>
       <div className="metric" key={key}><small>{key.replaceAll("_"," ")}</small><strong>{value}</strong></div>)}</div>
     <div className="lab-two-col">
