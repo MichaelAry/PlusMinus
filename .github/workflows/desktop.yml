@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# Only the newest commit of a branch needs the full desktop build matrix.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   desktop:
     name: ${{ matrix.platform }}
@@ -52,6 +57,7 @@ jobs:
         run: |
           ctest --test-dir ide/build -C Release --output-on-failure
           python3 ide/smoke_test.py
+          python3 -c "import sys; sys.path.insert(0,'ide'); from native_tests import discover_native_tests, find_native_runner; assert len(discover_native_tests(find_native_runner())) == 225"
           python3 -m unittest discover -s tools -p 'test_*.py'
           python3 -m venv .venv
           .venv/bin/python -m pip install -r ide/requirements.txt pyinstaller==6.16.0
@@ -69,6 +75,7 @@ jobs:
         timeout-minutes: 5
         run: |
           python ide/smoke_test.py
+          python -c "import sys; sys.path.insert(0,'ide'); from native_tests import discover_native_tests, find_native_runner; assert len(discover_native_tests(find_native_runner())) == 225"
           python -m unittest discover -s tools -p "test_*.py"
 
       - name: Install GUI dependencies (Windows/macOS)
