@@ -86,3 +86,7 @@ No public shell command is granted to JavaScript, no native VM live stepping, no
 Source/runner protocols remain distinct: \`plusminus_runner\` consumes raw
 UTF-8 stdin until EOF, no JSON-RPC; \`plusminus_native_tests\` consumes argv
 \`--list\` or \`--run ID\` and writes JSON Lines.
+
+## Complete history export
+
+`export_history({format: "csv" | "json"})` presents a native save dialog. The destination must not already exist. The streaming exporter reads only `studio-v5.db` and leaves `studio.db` untouched; CSV output escapes quotes and guards spreadsheet formula interpretation. There is no 1000-record UI limit on exported data.

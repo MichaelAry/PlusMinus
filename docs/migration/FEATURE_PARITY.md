@@ -55,3 +55,7 @@ remain PARTIAL until the latest CI and real desktop smoke tests are complete.
 Live VM stepping/breakpoints, persistent cross-cell VM state and structured
 native AST are BLOCKED by the unchanged C++ runner contract. This is not the
 Stage 3 cutover.
+
+## Stage 2 trace and history improvements
+
+An interactive, virtualized post-execution trace replay preserves the native 5000-event cap. The History panel can stream complete SQLite history into a new CSV or JSON file. A differential smoke check compares Studio 4's Python adapter against the unchanged C++ runner in CI. These features remain PARTIAL until all cross-platform and GUI checks pass.
