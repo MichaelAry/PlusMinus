@@ -22,6 +22,7 @@ assert window.editor.toPlainText()
 window.open_language_internals('print')
 app.processEvents()
 assert window.language_window is not None
+assert not window.language_window.dirty(), 'Loading a C++ source must not mark it as edited'
 assert 'if (c.name == "print")' in window.language_window.editor.toPlainText()
 assert not window.language_window.editor.isReadOnly()
 window.language_window.close()
