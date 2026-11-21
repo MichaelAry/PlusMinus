@@ -4,6 +4,45 @@ import { useStudio } from "../../model/studio";
 import { diagnose } from "../../model/sourceDiagnostics";
 
 const models = new Map<string, monaco.editor.ITextModel>();
+const listeners = new Map<string, monaco.IDisposable>();
+const markerTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function lexicalMarkers(model:monaco.editor.ITextModel,cpp:boolean){
+  if(model.isDisposed()||cpp)return;
+  monaco.editor.setModelMarkers(model,"plusminus-lexical",diagnose(model.getValue()).map(p=>({
+    startLineNumber:p.line,endLineNumber:p.line,startColumn:p.column,
+    endColumn:p.column+1,severity:p.severity==="error"?monaco.MarkerSeverity.Error:
+      p.severity==="warning"?monaco.MarkerSeverity.Warning:monaco.MarkerSeverity.Info,
+    message:p.message,code:p.code,
+  })));
+}
+
+// One content handler per shared Monaco model, regardless of split editors.
+// Prune even when every editor pane has been closed. Never dispose a still-open tab.
+let previousIdentity="";
+const unsubscribe=useStudio.subscribe(s=>{
+  const identity=JSON.stringify([s.workspace,s.documents.map(d=>d.id)]);
+  if(identity===previousIdentity)return;
+  previousIdentity=identity;
+  const live=new Set(s.documents.map(d=>`${s.workspace??"no-workspace"}::${d.id}`));
+  for(const [key,model] of models){
+    if(!live.has(key)){
+      listeners.get(key)?.dispose();listeners.delete(key);
+      const timer=markerTimers.get(key);
+      if(timer)clearTimeout(timer);
+      markerTimers.delete(key);
+      model.dispose();
+      models.delete(key);
+    }
+  }
+});
+import.meta.hot?.dispose(()=>{
+  unsubscribe();
+  for(const timer of markerTimers.values())clearTimeout(timer);
+  for(const listener of listeners.values())listener.dispose();
+  for(const model of models.values())model.dispose();
+  markerTimers.clear();listeners.clear();models.clear();
+});
 
 export function EditorPane() {
   const host = useRef<HTMLDivElement>(null);
@@ -43,27 +82,23 @@ export function EditorPane() {
         monaco.Uri.parse("inmemory://plusminus/" + encodeURIComponent(modelKey)));
       models.set(modelKey, model);
     }
+    if (!listeners.has(modelKey)) {
+      const id=current.id;
+      const cpp=/\.(cpp|hpp|h)$/.test(current.path);
+      lexicalMarkers(model,cpp);
+      const sharedModel=model;
+      listeners.set(modelKey,sharedModel.onDidChangeContent(()=>{
+        useStudio.getState().edit(id,sharedModel.getValue());
+        const pending=markerTimers.get(modelKey);
+        if(pending)clearTimeout(pending);
+        markerTimers.set(modelKey,setTimeout(()=>{
+          markerTimers.delete(modelKey);
+          lexicalMarkers(sharedModel,cpp);
+        },350));
+      }));
+    }
     if (model.getValue() !== current.source) model.setValue(current.source);
     editor.current.setModel(model);
-    const updateMarkers=()=>{
-      if(!model||model.isDisposed())return;
-      if(/\.(cpp|hpp|h)$/.test(current.path))return;
-      const markers=diagnose(model.getValue()).map(p=>({
-        startLineNumber:p.line,endLineNumber:p.line,startColumn:p.column,
-        endColumn:p.column+1,severity:p.severity==="error"?monaco.MarkerSeverity.Error:
-          p.severity==="warning"?monaco.MarkerSeverity.Warning:monaco.MarkerSeverity.Info,
-        message:p.message,code:p.code,
-      }));
-      monaco.editor.setModelMarkers(model,"plusminus-lexical",markers);
-    };
-    updateMarkers();
-    let pending:ReturnType<typeof setTimeout>|undefined;
-    const sub = model.onDidChangeContent(() => {
-      useStudio.getState().edit(current.id, model!.getValue());
-      if(pending)clearTimeout(pending);
-      pending=setTimeout(updateMarkers,350);
-    });
-    return () => {if(pending)clearTimeout(pending);sub.dispose();};
   }, [modelKey]);
 
   // Authoritative native diagnostics belong only to the exact source snapshot
@@ -86,13 +121,6 @@ export function EditorPane() {
     }) : [];
     monaco.editor.setModelMarkers(model,"plusminus-native",markers);
   },[modelKey,response,reportedSource,current?.id,current?.source]);
-
-  useEffect(() => {
-    const ids = new Set(docs.map((d) => `${workspace ?? "no-workspace"}::${d.id}`));
-    for (const [id, model] of models) {
-      if (!ids.has(id)) { model.dispose(); models.delete(id); }
-    }
-  }, [docs, workspace]);
 
   useEffect(() => {
     const handler = (event: Event) => {

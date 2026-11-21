@@ -63,9 +63,10 @@ export const useStudio = create<StudioStore>((set) => ({
     if (rest.length === 0) rest.push(newUntitled());
     return { documents: rest, activeId: s.activeId === id ? rest[rest.length - 1].id : s.activeId };
   }),
-  edit: (id, source) => set((s) => ({
-    documents: s.documents.map((d) => d.id === id ? { ...d, source, dirty: true } : d),
-  })),
+  edit: (id, source) => set((s) => {
+    if (!s.documents.some(d=>d.id===id && d.source!==source))return s;
+    return {documents:s.documents.map(d=>d.id===id?{...d,source,dirty:true}:d)};
+  }),
   saved: (id, doc) => set((s) => ({
     documents: s.documents.map((d) => d.id === id ? { ...d, id: doc.path, digest: doc.digest, path: doc.path, dirty: d.source !== doc.source } : d),
     activeId: s.activeId === id ? doc.path : s.activeId,

@@ -27,6 +27,23 @@ describe("document lifecycle", () => {
   });
 });
 
+describe("multiple split panes sharing one source model",()=>{
+  it("does not notify subscribers on duplicate or unknown source changes",()=>{
+    useStudio.getState().setWorkspace("model-lifecycle",[]);
+    useStudio.getState().open({path:"shared.pm",source:"print(1);",digest:"x"});
+    let events=0;
+    const unsub=useStudio.subscribe(()=>{events++;});
+    const before=useStudio.getState().documents;
+    useStudio.getState().edit("shared.pm","print(1);");
+    useStudio.getState().edit("missing.pm","other");
+    expect(useStudio.getState().documents).toBe(before);
+    expect(events).toBe(0);
+    useStudio.getState().edit("shared.pm","print(2);");
+    expect(events).toBe(1);
+    unsub();
+  });
+});
+
 describe("execution diagnostics source identity",()=>{
   it("keeps native results associated with the executed snapshot, not a later tab",()=>{
     useStudio.getState().setWorkspace("diagnostics",[]);
