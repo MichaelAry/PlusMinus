@@ -130,8 +130,9 @@ TEST_CLASS(AsyncExecutionExtended)
             Assert::IsTrue(out.find("before sync") < out.find("after sync"));
             // outer start всегда до outer end (в одном потоке)
             Assert::IsTrue(out.find("outer start") < out.find("outer end"));
-            // before всегда до outer start (поток стартует после print)
-            Assert::IsTrue(out.find("before sync") < out.find("outer start"));
+            // go outer() may run BEFORE the main thread prints "before sync".
+            // There is deliberately no ordering constraint between those events.
+            // after is guaranteed to happen after joining outer and inner.
             // after всегда после всего
             Assert::IsTrue(out.find("after sync") > out.find("outer start"));
             Assert::IsTrue(out.find("after sync") > out.find("outer end"));
@@ -152,7 +153,18 @@ TEST_CLASS(AsyncExecutionExtended)
                 "print(\"End\");\n";
 
             std::string out = getOutput(prog);
-            Assert::AreEqual(std::string("Task 1\nTask 2\n---\nTask 3\nEnd\n"), out);
+            const auto first = out.find("Task 1\n");
+            const auto second = out.find("Task 2\n");
+            const auto separator = out.find("---\n");
+            const auto third = out.find("Task 3\n");
+            const auto end = out.find("End\n");
+            // Task 1 and Task 2 are unordered, but both must complete at sync.
+            Assert::IsTrue(first != std::string::npos && second != std::string::npos);
+            Assert::IsTrue(separator != std::string::npos && first < separator && second < separator);
+            Assert::IsTrue(third != std::string::npos && end != std::string::npos);
+            Assert::IsTrue(separator < third && third < end);
+            // Exactly these five lines; no output may be silently omitted.
+            Assert::AreEqual(std::string("Task 1\nTask 2\n---\nTask 3\nEnd\n").size(), out.size());
         }
 
         // 5. Использование lock/unlock внутри асинхронных задач (имитация доски)
