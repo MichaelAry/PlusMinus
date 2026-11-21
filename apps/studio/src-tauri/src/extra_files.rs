@@ -140,6 +140,34 @@ pub fn is_cpp_file(relative:&str)->bool{category(relative).is_ok_and(|s|s=="cpp"
 mod tests {
  use super::*;
  #[test]fn traversal_rejected(){assert!(category("../src/vm.cpp").is_err());assert!(category("/etc/a.cpp").is_err());}
+ #[test]fn notebook_round_trip_conflict_and_metadata_preservation(){
+   let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+      .unwrap().as_nanos();
+   let root=std::env::temp_dir().join(format!("studio5-notebook-{}-{nonce}",std::process::id()));
+   fs::create_dir(&root).unwrap();
+   let input=serde_json::json!({
+      "nbformat":4,"nbformat_minor":5,
+      "metadata":{"language_info":{"name":"plusminus"},"custom":{"note":"preserve"}},
+      "cells":[{"cell_type":"code","id":"cell-1","metadata":{},
+          "source":["print(0);\n"],"execution_count":null,"outputs":[]}]
+   }).to_string();
+   let created=create(&root,"research.ipynb",&input).unwrap();
+   assert_eq!(open(&root,"research.ipynb").unwrap().source,input);
+   let new=serde_json::json!({
+      "nbformat":4,"nbformat_minor":5,
+      "metadata":{"language_info":{"name":"plusminus"},"custom":{"note":"preserve"}},
+      "cells":[{"cell_type":"code","id":"cell-1","metadata":{},
+          "source":"print(1);","execution_count":1,"outputs":[{
+            "output_type":"stream","name":"stdout","text":"1\n"}]}]
+   }).to_string();
+   let saved=save(&root,"research.ipynb",&new,&created.digest).unwrap();
+   assert_eq!(open(&root,"research.ipynb").unwrap().source,new);
+   assert!(save(&root,"research.ipynb",&input,&created.digest).is_err());
+   assert_eq!(open(&root,"research.ipynb").unwrap().digest,saved.digest);
+   assert!(open(&root,"../research.ipynb").is_err());
+   fs::remove_dir_all(&root).unwrap();
+ }
+
  #[test]fn foreign_kernel_rejected(){
    let x=serde_json::json!({"nbformat":4,"metadata":{"kernelspec":{"name":"python3"}},
       "cells":[]});

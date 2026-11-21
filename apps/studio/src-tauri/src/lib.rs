@@ -32,7 +32,8 @@ async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: proc
     let id = request.job_id.clone();
     let category = format!("{:?}",request.mode);
     let source = request.source.clone();
-    let result = process::execute(&app, request, token).await;
+    let result = process::execute(&app, request, token.clone()).await;
+    let was_canceled = token.is_cancelled();
     if let Ok(ref report)=result {
         let ok=report.report["ok"].as_bool().unwrap_or(false);
         let ms=report.wall_ms;
@@ -43,7 +44,7 @@ async fn run_source(app: AppHandle, state: State<'_, StudioState>, request: proc
     }
     let passed = result.as_ref().ok().and_then(|r|r.report["ok"].as_bool()).unwrap_or(false);
     state.tasks.advance(&id, passed)?;
-    state.tasks.complete(&id,None,false,result.as_ref().err().cloned());
+    state.tasks.complete(&id,None,was_canceled,result.as_ref().err().cloned());
     result
 }
 
