@@ -532,7 +532,7 @@ class Studio(QMainWindow):
         self.diagnostic_timer.setSingleShot(True)
         self.diagnostic_timer.setInterval(650)
         self.diagnostic_timer.timeout.connect(self.request_compile_diagnostics)
-        if not self.safe_mode:
+        if not self.safe_mode and '--gui-smoke' not in sys.argv:
             self.resource_timer.start(900)
             QTimer.singleShot(450, self.auto_tests)
             QTimer.singleShot(1200, self.discover_native)
@@ -1970,13 +1970,14 @@ def main():
         os.environ.setdefault('QT_OPENGL', 'software')
         os.environ.setdefault('QSG_RHI_BACKEND', 'software')
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
-    argv = [arg for arg in sys.argv if arg != '--safe-mode']
+    argv = [arg for arg in sys.argv
+            if arg not in ('--safe-mode', '--qt-probe', '--gui-smoke')]
     startup_mark("main: creating QApplication")
     app = QApplication(argv)
     startup_mark("main: QApplication initialized")
     app.setApplicationName('PlusMinus Studio')
     app.setOrganizationName('PlusMinus')
-    if '--qt-probe' in argv:
+    if '--qt-probe' in sys.argv:
         # Isolate the native Qt platform plugin and display driver from all
         # Studio widgets and persistent project settings.
         from PySide6.QtWidgets import QLabel
