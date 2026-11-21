@@ -810,6 +810,64 @@ class Studio(QMainWindow):
             self.update_analysis()
             self.update_cursor()
 
+    def present_problems(self, issues, editor=None):
+        editor = editor or self.editor
+        editor.set_diagnostics(issues)
+        editor._issues = list(issues)
+        if editor is not self.editor:
+            return
+        self.current_problems = list(issues)
+        rows = [(str(item.get('severity','info')).upper(), item.get('code',''),
+                 item.get('line') or '—', item.get('column') or '—',
+                 item.get('message','')) for item in issues]
+        fill_table(self.problems_table,rows)
+        if issues:
+            self.diagnostics.setPlainText('\n'.join(
+                f"{r[0]} {r[1]} ({r[2]}:{r[3]}): {r[4]}" for r in rows))
+        else:
+            self.diagnostics.setPlainText('No current diagnostics.')
+
+    def jump_to_problem(self, *_):
+        row = self.problems_table.currentRow()
+        if not 0 <= row < len(getattr(self,'current_problems', [])):
+            return
+        issue = self.current_problems[row]
+        number = int(issue.get('line') or 0)
+        if number <= 0:
+            return
+        block = self.editor.document().findBlockByNumber(number-1)
+        if block.isValid():
+            cursor = self.editor.textCursor()
+            cursor.setPosition(min(block.position()+max(0,int(issue.get('column') or 1)-1),
+                                   block.position()+max(0,block.length()-1)))
+            self.editor.setTextCursor(cursor)
+            self.editor.setFocus()
+            self.editor.centerCursor()
+            self.nav.setCurrentRow(1)
+
+    def request_compile_diagnostics(self):
+        if not self.runner or self.native_building:
+            return
+        doc = self.documents.current_document()
+        if not doc or (doc.path and doc.path.suffix.lower() in ('.cpp','.h','.hpp')):
+            return
+        if any(job.isRunning() for job in self.jobs):
+            return
+        source = doc.editor.toPlainText()
+        runner = self.runner
+        self.spawn(lambda: execute(runner,source,'compile',5.0),
+                   lambda report, d=doc, text=source: self.compiled_diagnostics_done(d,text,report),
+                   'Background syntax check')
+
+    def compiled_diagnostics_done(self, doc, source, report):
+        if doc.editor.toPlainText() != source:
+            return
+        issues = analyze_diagnostics(source) + list(report.get('diagnostics') or [])
+        self.present_problems(issues,doc.editor)
+        if doc is self.documents.current_document():
+            self.statusBar().showMessage(
+                f'{len(issues)} diagnostics' if issues else 'Syntax check passed', 2500)
+
     def update_cursor(self):
         cursor = self.editor.textCursor()
         self.cursor_label.setText(f'Line {cursor.blockNumber()+1}  ·  Column {cursor.positionInBlock()+1}')
@@ -827,6 +885,14 @@ class Studio(QMainWindow):
         ]))
         self.code_warnings.setPlainText('\n'.join(metrics['warnings']) if metrics['warnings']
                                         else 'No lexical warnings. Static analysis is heuristic, not a proof of correctness.')
+        doc = self.documents.current_document()
+        is_cpp = bool(doc and doc.path and doc.path.suffix.lower() in ('.cpp','.h','.hpp'))
+        if is_cpp:
+            self.present_problems([],self.editor)
+        else:
+            self.present_problems(analyze_diagnostics(self.editor.toPlainText()),self.editor)
+            if hasattr(self,'diagnostic_timer'):
+                self.diagnostic_timer.start()
         doc = self.documents.current_document()
         self.file_label.setText((doc.path.name if doc and doc.path else 'untitled.pm') +
                                  ('  ● unsaved changes' if doc and doc.modified else ''))
@@ -906,6 +972,8 @@ class Studio(QMainWindow):
         self.last_report = report
         self.output.setPlainText(report['output'] + (f"\nReturn: {report['result']}" if report['result'] else ''))
         self.diagnostics.setPlainText(report['error'] or 'Execution successful; no runtime diagnostics.')
+        self.present_problems(
+            analyze_diagnostics(source) + list(report.get('diagnostics') or []))
         self.bytecode.setPlainText(report['bytecode'])
         self.variables.setPlainText(report['variables'])
         self.result_tabs.setCurrentIndex(1 if report['error'] else 0)
