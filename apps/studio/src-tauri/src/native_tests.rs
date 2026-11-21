@@ -1,11 +1,19 @@
 //! Isolated C++ native test orchestration; zero changes to the C++ suite.
 use crate::{history::{self,NativeResult},process,StudioState};
 use serde::{Deserialize,Serialize};
-use std::{collections::HashSet,process::Stdio,time::{Duration,Instant}};
+use std::{collections::HashSet,process::Stdio,time::{Duration,Instant},sync::{Arc,LazyLock}};
 use tauri::{AppHandle,State,Manager,ipc::Channel};
 use std::sync::atomic::Ordering;
-use tokio::{process::Command,task::JoinSet};
+use tokio::{process::Command,task::JoinSet,sync::Semaphore};
 use tokio_util::sync::CancellationToken;
+
+
+// One shared limit for *all* native suites. Each suite has at most two jobs
+// locally; concurrent panels may not multiply the global process count.
+static NATIVE_WORKERS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(||Arc::new(Semaphore::new(2)));
+const MAX_TEST_STDOUT: usize = 256 * 1024;
+const MAX_TEST_STDERR: usize = 128 * 1024;
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct NativeCase {
@@ -52,42 +60,67 @@ fn failed(case:&NativeCase,status:&str,error:String,elapsed:f64) -> NativeResult
 
 async fn run_single(path:&std::path::Path,case:NativeCase,timeout_sec:u64,
     token:CancellationToken)->NativeResult{
+    // Permit acquisition is cancelable, so queued tasks never block Stop.
+    let _permit=tokio::select!{
+        _=token.cancelled()=>return failed(&case,"CANCELED","Canceled while queued".into(),0.0),
+        res=NATIVE_WORKERS.clone().acquire_owned()=>match res{
+            Ok(permit)=>permit,
+            Err(e)=>return failed(&case,"ERROR",format!("Test queue unavailable: {e}"),0.0),
+        }
+    };
     let start=Instant::now();
-    if token.is_cancelled(){return failed(&case,"CANCELED","Canceled".into(),0.0);}
+    if token.is_cancelled(){return failed(&case,"CANCELED","Canceled before spawn".into(),0.0);}
     let child=Command::new(path).arg("--run").arg(&case.id)
        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
        .kill_on_drop(true).spawn();
-    let child=match child{Ok(ch)=>ch,Err(e)=>return failed(&case,"ERROR",e.to_string(),0.0)};
-    let output=tokio::select!{
-      _=token.cancelled()=>Err("CANCELED"),
-      r=tokio::time::timeout(Duration::from_secs(timeout_sec),child.wait_with_output())=>{
-        match r {Ok(x)=>x.map_err(|_|"ERROR"),Err(_)=>Err("TIMEOUT")}
-      }
+    let mut child=match child{Ok(ch)=>ch,Err(e)=>return failed(&case,"ERROR",e.to_string(),0.0)};
+    let stdout=match child.stdout.take(){Some(s)=>s,None=>return failed(&case,"ERROR","Missing native stdout pipe".into(),0.0)};
+    let stderr=match child.stderr.take(){Some(s)=>s,None=>return failed(&case,"ERROR","Missing native stderr pipe".into(),0.0)};
+
+    // Stream to bounded buffers rather than collecting unlimited child output.
+    // An exceeding stream terminates the process immediately, not after exit.
+    let execution=async {
+        tokio::try_join!(
+            async {child.wait().await.map_err(|e|e.to_string())},
+            process::read_capped(stdout,MAX_TEST_STDOUT),
+            process::read_capped(stderr,MAX_TEST_STDERR)
+        )
     };
-    let elapsed=start.elapsed().as_secs_f64()*1000.0;
-    let output=match output{
-      Ok(x)=>x,
-      Err("CANCELED")=>return failed(&case,"CANCELED","Execution canceled".into(),elapsed),
-      Err("TIMEOUT")=>return failed(&case,"TIMEOUT",format!("Time limit exceeded ({timeout_sec}s)"),elapsed),
-      Err(_)=>return failed(&case,"ERROR","Native process failed".into(),elapsed)
+    let outcome=tokio::select!{
+        _=token.cancelled()=>Err("CANCELED".to_string()),
+        r=tokio::time::timeout(Duration::from_secs(timeout_sec),execution)=>{
+            match r{Ok(value)=>value,Err(_)=>Err("TIMEOUT".to_string())}
+        }
     };
-    if output.stdout.len()>256*1024||output.stderr.len()>128*1024{
-        return failed(&case,"ERROR","Native test output exceeded limit".into(),elapsed);
+    if outcome.is_err(){
+        let _=child.start_kill();
+        let _=tokio::time::timeout(Duration::from_secs(2),child.wait()).await;
     }
-    let text=String::from_utf8_lossy(&output.stdout);
-    let record=text.lines().filter(|l|!l.trim().is_empty())
-      .find_map(|l|serde_json::from_str::<serde_json::Value>(l).ok()
-       .filter(|v|v["type"]=="result"));
-    let Some(data)=record else {
-        return failed(&case,"ERROR",format!("No native JSON result: {}",String::from_utf8_lossy(&output.stderr)),elapsed);
+    let elapsed=start.elapsed().as_secs_f64()*1000.0;
+    let (exit,stdout,stderr)=match outcome{
+        Ok(value)=>value,
+        Err(reason) if reason=="CANCELED"=>
+            return failed(&case,"CANCELED","Execution canceled".into(),elapsed),
+        Err(reason) if reason=="TIMEOUT"=>
+            return failed(&case,"TIMEOUT",format!("Time limit exceeded ({timeout_sec}s)"),elapsed),
+        Err(reason)=>return failed(&case,"ERROR",reason,elapsed),
     };
+    let text=String::from_utf8_lossy(&stdout);
+    let records:Vec<_>=text.lines().filter(|l|!l.trim().is_empty())
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<_,_>>().unwrap_or_default();
+    if records.len()!=1||records[0]["type"]!="result"{
+        return failed(&case,"ERROR",format!("Expected exactly one valid JSONL result: {}",
+            String::from_utf8_lossy(&stderr)),elapsed);
+    }
+    let data=&records[0];
     if data["id"]!=case.id||!matches!(data["status"].as_str(),Some("PASS"|"FAIL")){
         return failed(&case,"ERROR","Native result id/status mismatch".into(),elapsed);
     }
     let status=data["status"].as_str().unwrap_or("ERROR");
     let expected_exit=if status=="PASS"{0}else{1};
-    if output.status.code()!=Some(expected_exit){
-        return failed(&case,"ERROR",format!("Unexpected process exit: {:?}",output.status.code()),elapsed);
+    if exit.code()!=Some(expected_exit){
+        return failed(&case,"ERROR",format!("Unexpected process exit: {:?}",exit.code()),elapsed);
     }
     let test_ms=data["elapsed_ms"].as_f64();
     NativeResult{id:case.id,group:case.group,source:case.source,slow:case.slow,

@@ -87,7 +87,7 @@ pub fn resolve_native(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     Err(format!("{name} not found; build C++ and stage native sidecars first"))
 }
 
-async fn read_capped<R: AsyncRead + Unpin>(mut stream: R, max: usize) -> Result<Vec<u8>, String> {
+pub(crate) async fn read_capped<R: AsyncRead + Unpin>(mut stream: R, max: usize) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 8192];
     loop {
@@ -200,6 +200,17 @@ mod tests {
     #[test]
     fn success_exit_mismatch_is_error() {
         assert!(decode_report(EMPTY.as_bytes(), Some(1)).is_err());
+    }
+    #[tokio::test]
+    async fn bounded_stream_read_rejects_excess_bytes_before_eof(){
+        use tokio::io::AsyncWriteExt;
+        let (mut writer,reader)=tokio::io::duplex(64);
+        let send=tokio::spawn(async move{
+            let _=writer.write_all(&vec![b'x';128]).await;
+        });
+        let rejected=read_capped(reader,100).await;
+        assert!(rejected.unwrap_err().contains("exceeds 100 bytes"));
+        send.abort();
     }
     #[test]
     fn rejects_multiple_objects_and_invalid_payload() {
