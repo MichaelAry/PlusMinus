@@ -2,7 +2,7 @@ name: Studio 5 Tauri foundation (experimental)
 
 on:
   push:
-    branches: ['master', 'feature/studio5-*']
+    branches: ['master']
     paths:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
@@ -63,8 +63,8 @@ jobs:
       - name: Verify C++ core and Qt files remain unchanged
         shell: bash
         run: |
-          git fetch --no-tags origin master --depth=1
-          git diff --exit-code origin/master HEAD -- \
+          git fetch --no-tags origin 41360ed7f470dd76da264b24ff74171ef55da5c2 --depth=1
+          git diff --exit-code 41360ed7f470dd76da264b24ff74171ef55da5c2 HEAD -- \
             src/ include/ ide/ tests/cpp/ tests/portable/ \
             CMakeLists.txt launch.py .github/workflows/desktop.yml
 
