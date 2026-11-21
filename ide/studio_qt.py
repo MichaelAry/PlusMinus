@@ -726,8 +726,10 @@ class Studio(QMainWindow):
         layout.addWidget(chart, 1)
         bottom, bottom_col = panel()
         bottom_col.addWidget(label('Compiled bytecode  /  opcode frequency'))
-        self.opcode_table = table(['Opcode', 'Static instructions', 'Share'])
+        self.opcode_table = table(['Opcode', 'Static count', 'Executed', 'Share'])
         bottom_col.addWidget(self.opcode_table)
+        self.opcode_chart = Plot('Executed instructions by opcode  /  profile mode')
+        bottom_col.addWidget(self.opcode_chart)
         layout.addWidget(bottom, 1)
         return page_widget
 
@@ -1108,7 +1110,7 @@ class Studio(QMainWindow):
         source = self.editor.toPlainText()
         self.cancel.clear()
         runner = self.runner
-        self.spawn(lambda: execute(runner,source,mode,8.0,self.cancel),
+        self.spawn(lambda: execute(runner,source,'profile' if profile else mode,8.0,self.cancel),
                    lambda report: self.show_report(report,source,'Profile' if profile else 'Run'),
                    'Profile' if profile else 'Compile' if mode=='compile' else 'Run')
 
@@ -1138,9 +1140,18 @@ class Studio(QMainWindow):
         ]
         self.profile_metrics.setText('\n'.join(details))
         bc = analyze_bytecode(report['bytecode'])
-        total = max(1, bc['instructions'])
-        fill_table(self.opcode_table,[(op, qty, f'{qty/total*100:.1f}%')
-                                       for op,qty in bc['opcodes'].items()])
+        hits = metrics.get('opcode_hits', {})
+        total = max(1,sum(hits.values()) if hits else bc['instructions'])
+        names = sorted(set(bc['opcodes']) | set(hits),
+                       key=lambda name: hits.get(name,bc['opcodes'].get(name,0)),reverse=True)
+        fill_table(self.opcode_table,[
+            (op,bc['opcodes'].get(op,0),hits.get(op,'—'),
+             f'{(hits.get(op,bc["opcodes"].get(op,0))/total)*100:.1f}%') for op in names])
+        self.opcode_chart.set_series([
+            ('Opcode execution hits',[hits[x] for x in names if x in hits],COLORS['accent'])])
+        if hits:
+            self.profile_metrics.setText(self.profile_metrics.text() +
+                f"\nExecuted instructions (instrumented): {metrics.get('executed_instructions',0)}")
         self.statusBar().showMessage(f"{'PASS' if report['ok'] else 'ERROR'}  ·  {report['ms']:.2f} ms",6000)
         self.refresh_history()
         self.nav.setCurrentRow(3 if category == 'Profile' else 1)

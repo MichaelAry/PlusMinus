@@ -44,7 +44,7 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
     try:
         if cancel.is_set():
             raise RuntimeError('Stopped by user')
-        if mode not in ('run', 'compile'):
+        if mode not in ('run', 'compile', 'profile'):
             raise ValueError('Unsupported execution mode')
         process = subprocess.Popen([str(Path(path).resolve()), mode], stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -89,8 +89,10 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
             report.update({k: decoded[k] for k in report if k in decoded})
             if isinstance(decoded.get('metrics'), dict):
                 metrics.update({k: v for k,v in decoded['metrics'].items()
-                                if k in ('compile_ms','execute_ms','program_instructions')
-                                and isinstance(v,(int,float))})
+                                if k in ('compile_ms','execute_ms','program_instructions',
+                                         'executed_instructions','opcode_hits')
+                                and (isinstance(v,(int,float)) or
+                                     (k=='opcode_hits' and isinstance(v,dict)))})
             if process.returncode and report['ok']:
                 report.update(ok=False,error=f'Runner exited with code {process.returncode}')
         except (ValueError, UnicodeError):

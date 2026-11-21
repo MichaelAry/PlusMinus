@@ -36,6 +36,8 @@ double VM::executeThread(const std::vector<Command>& program, size_t startIp,
 
     while (ip < program.size()) {
         const Command& c = program[ip];
+        if (profileEnabled)
+            opcodeCounts[static_cast<std::size_t>(c.op)].fetch_add(1,std::memory_order_relaxed);
         switch (c.op) {
         case OpCode::PushConst:
             if (c.isStr) stack.push_back(Value(c.str));
