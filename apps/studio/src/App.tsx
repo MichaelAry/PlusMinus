@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState, type LazyExoticComponent, type ReactElement } from "react";
 import { DockviewReact, themeDark, type DockviewReadyEvent } from "dockview-react";
 import { native } from "./api/native";
 import { parity } from "./api/parity";
@@ -19,7 +19,7 @@ const GraphLazy=lazy(()=>import("./features/parity/GraphPanel").then(m=>({defaul
 const NotebookLazy=lazy(()=>import("./features/parity/NotebookPanel").then(m=>({default:m.NotebookPanel})));
 const LanguageLazy=lazy(()=>import("./features/parity/LanguagePanel").then(m=>({default:m.LanguagePanel})));
 const GitLazy=lazy(()=>import("./features/parity/GitPanel").then(m=>({default:m.GitPanel})));
-const deferred=(Component:React.LazyExoticComponent<()=>React.ReactElement>)=>
+const deferred=(Component:LazyExoticComponent<()=>ReactElement>)=>
   function DeferredPanel(){
     return <Suspense fallback={<div className="empty-state" role="status">Loading panel…</div>}>
       <Component/>

@@ -60,3 +60,38 @@ the unchanged C++ sidecars. On each platform, also execute
 and the original CTest suite. These are *correctness* checks, not comparative
 performance measurements. No new CPU/RSS, startup, editor-latency or Qt/Tauri
 benchmark values have been obtained in this session.
+
+## Stage 3 Qt-vs-Tauri matrix (Windows x64 / Linux x64)
+
+**No desktop GUI comparison was performed in the agent environment.**
+No made-up CPU, RAM or timing data are reported. CI package-build elapsed
+time is not a user-facing desktop performance benchmark.
+
+| Test | Qt Studio 4 | Tauri Studio 5 | Repeatable measurement protocol |
+|---|---|---|---|
+| Cold start | NOT MEASURED | NOT MEASURED | 10 fresh starts, window ready timestamp |
+| Idle total RAM | NOT MEASURED | NOT MEASURED | 10 samples after 60s idle, all WebView/native children |
+| Idle CPU | NOT MEASURED | NOT MEASURED | Process-tree CPU samples, median/p95 |
+| Monaco typing latency | NOT MEASURED | NOT MEASURED | 200 key-to-paint events, 1k/20k-line corpus |
+| Editor scrolling | NOT MEASURED | NOT MEASURED | 20k lines, frame rate and p95 frame time |
+| Opening 20 files | NOT MEASURED | NOT MEASURED | Same 20 .pm files, 10 repeated runs |
+| Complete native tests | NOT MEASURED | NOT MEASURED | All 225 individually, 3 sessions, compare IDs |
+| Trace replay (5000) | NOT MEASURED | NOT MEASURED | Same native trace, 20 slider/scroll passes |
+| Large history/table | NOT MEASURED | NOT MEASURED | 10k rows, 10 navigation passes |
+| Open/close/resizing panels | NOT MEASURED | NOT MEASURED | 20 repeats, record frame times |
+| Load and edit notebook | NOT MEASURED | NOT MEASURED | 500 code/Markdown cells, 5 repeats |
+| Long-session memory leaks | NOT MEASURED | NOT MEASURED | 60-minute session, process RSS slope |
+
+For EACH comparison capture: OS version/build, x64 CPU, logical cores, RAM,
+GPU/WebView runtime, Node/npm, Rust/rustc, Qt/PySide6, compiler, release flags,
+SHA of both installed packages, C++ executable SHA256, repetition count,
+timestamped raw samples, median/p95 and dispersion. Use identical data,
+hardware, native binary and user action scripts for both GUIs.
+
+Commands for repeatable correctness inputs: `cmake -S . -B build/studio5 -DCMAKE_BUILD_TYPE=Release`,
+`cmake --build build/studio5 --config Release`,
+`node scripts/verify-native-isolation.mjs --build-dir build/studio5`,
+`node scripts/smoke-native.mjs --build-dir build/studio5`.
+Install Qt and Studio 5 candidates on the same workstation, run the GUI actions
+above, archive raw traces. Never label code-splitting or memoization as a
+measured win without collected before/after traces.

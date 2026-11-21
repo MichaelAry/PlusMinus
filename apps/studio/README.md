@@ -1,4 +1,4 @@
-# PlusMinus Studio 5 — Stage 1 foundation
+# PlusMinus Studio 5 — Windows/Linux x64 Stage 3 candidate (not cut over)
 
 Experimental Tauri 2 / Rust / React / TypeScript / Vite / Monaco / Dockview GUI.
 This is a **parallel replacement**, not a removal of the working Qt Studio 4.
@@ -66,3 +66,15 @@ The first Stage 2 launch copies the legacy SQLite database into ~/.plusminus/stu
 Notebooks are nbformat v4 and isolated per cell, without shared VM state. Source changes are tracked for C++ rebuilds; any failed rebuild leaves native execution stale. Use a source checkout for Language Internals; packaged binaries need not include C++ sources.
 
 **Stage 2 is not approved for final cutover yet.** Follow docs/migration/STAGE2_STATUS.md for exact pending feature-parity and desktop smoke criteria. The original Qt application remains usable.
+
+## Windows/Linux x64 Stage 3 acceptance and fallback
+
+Source/release builds use Tauri 2, Rust, React, Monaco, Dockview and the
+original unmodified native C++ sidecars; no Python or PySide6 is needed to
+run an installed Studio 5 itself. The normal `Start-PlusMinus.cmd` and
+`Start-PlusMinus.sh` continue to launch the original Qt Studio 4.
+
+Clean file tabs can reopen after explicitly choosing the same workspace;
+unsaved source bytes are not persisted. Process-tree termination is
+best-effort (Linux groups, Windows taskkill) and has not been independently
+verified under adversarial descendants. See `docs/migration/STAGE3_WINDOWS_LINUX.md`.
