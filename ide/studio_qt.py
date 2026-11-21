@@ -32,6 +32,9 @@ from analytics import (BUILTIN_TESTS, HistoryStore, analyze_bytecode, analyze_so
 from engine import execute, find_runner
 from internals import keyword_at, editable_checkout
 from language_window import LanguageSourceWindow
+from workspace import WorkspaceTabs
+from documents import DocumentTabs
+from highlighting import PlusMinusHighlighter
 
 try:
     import psutil
@@ -285,27 +288,9 @@ class CodeEditor(QPlainTextEdit):
             bottom = top + int(self.blockBoundingRect(block).height())
             number += 1
 
-class Syntax(QSyntaxHighlighter):
-    def __init__(self, document):
-        super().__init__(document)
-        self.rules = []
-        for pattern, color, bold in [
-            (r'\b(?:if|else|while|func|proc|return|go|sync|lock|unlock)\b', '#a9bdde', True),
-            (r'\b(?:print|len|resize|sin|cos|pow|fact|multifact)\b', '#b9d1bc', True),
-            (r'\b\d+(?:\.\d+)?\b', '#ddbe90', False),
-            (r'"(?:\\.|[^"\\])*"', '#b7ccae', False),
-            (r'//[^\n]*', '#748195', False),
-        ]:
-            fmt = QTextCharFormat()
-            fmt.setForeground(QColor(color))
-            if bold:
-                fmt.setFontWeight(QFont.Weight.Bold)
-            self.rules.append((re.compile(pattern), fmt))
-
-    def highlightBlock(self, text):
-        for regex, fmt in self.rules:
-            for match in regex.finditer(text):
-                self.setFormat(match.start(), match.end()-match.start(), fmt)
+class Syntax(PlusMinusHighlighter):
+    """Backward-compatible name for the PlusMinus syntax highlighter."""
+    pass
 
 
 class Job(QThread):
@@ -362,7 +347,6 @@ class Studio(QMainWindow):
         self.analysis_timer.setSingleShot(True)
         self.analysis_timer.setInterval(300)
         self.analysis_timer.timeout.connect(self.update_analysis)
-        self.editor.textChanged.connect(self.analysis_timer.start)
         QTimer.singleShot(450, self.auto_tests)
 
     def make_shell(self):
@@ -407,14 +391,19 @@ class Studio(QMainWindow):
         toolbar_layout.addWidget(button('Language C++', self.open_language_internals))
         toolbar_layout.addWidget(button('Stop', self.stop))
         right_layout.addWidget(toolbar)
-        self.stack = QStackedWidget()
-        for create in (self.make_overview, self.make_editor, self.make_tests,
-                       self.make_profiler, self.make_resources, self.make_benchmarks,
-                       self.make_history):
-            self.stack.addWidget(create())
-        right_layout.addWidget(self.stack, 1)
+        self.stack = WorkspaceTabs()
+        self.workspace = self.stack
+        for title, create in zip(
+                ('Overview', 'Code Editor', 'Test Center', 'Profiler',
+                 'Resources', 'Benchmarks', 'History & Reports'),
+                (self.make_overview, self.make_editor, self.make_tests,
+                 self.make_profiler, self.make_resources, self.make_benchmarks,
+                 self.make_history)):
+            self.workspace.register_page(title, create())
+        right_layout.addWidget(self.workspace, 1)
         outer.addWidget(right, 1)
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.nav.currentRowChanged.connect(self.workspace.open_page)
+        self.workspace.pageActivated.connect(self.nav.setCurrentRow)
         self.nav.setCurrentRow(0)
         for shortcut, action in [('F5', lambda: self.launch('run')),
                                  ('F6', lambda: self.launch('run', profile=True)),
@@ -478,16 +467,11 @@ class Studio(QMainWindow):
         edit = QWidget()
         edit_layout = QVBoxLayout(edit)
         edit_layout.setContentsMargins(0,0,0,0)
-        self.editor = CodeEditor()
-        self.editor.setPlainText(EXAMPLE)
-        self.editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        font = QFont('Cascadia Code', 11)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        self.editor.setFont(font)
-        self.highlight = Syntax(self.editor.document())
-        self.editor.cursorPositionChanged.connect(self.update_cursor)
-        self.editor.definitionRequested.connect(self.open_language_internals)
-        edit_layout.addWidget(self.editor)
+        self.documents = DocumentTabs(self.make_source_editor)
+        self.documents.activated.connect(self.activate_document)
+        self.documents.savedFile.connect(lambda path: self.settings.setValue('last_file', path))
+        self.documents.new_document(EXAMPLE)
+        edit_layout.addWidget(self.documents)
         self.cursor_label = label('Line 1  ·  Column 1',style='muted')
         edit_layout.addWidget(self.cursor_label)
         split.addWidget(edit)
@@ -712,6 +696,29 @@ class Studio(QMainWindow):
         self.statusBar().showMessage('C++ interpreter rebuilt. Rerunning built-in tests.',10000)
         self.start_tests(startup=True)
 
+    def make_source_editor(self):
+        editor = CodeEditor()
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        font = QFont('Cascadia Code', 11)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        editor.setFont(font)
+        editor._highlighter = Syntax(editor.document())
+        editor.cursorPositionChanged.connect(
+            lambda e=editor: self.update_cursor() if getattr(self,'editor',None) is e else None)
+        editor.definitionRequested.connect(self.open_language_internals)
+        editor.textChanged.connect(
+            lambda e=editor: self.analysis_timer.start()
+            if hasattr(self,'analysis_timer') and getattr(self,'editor',None) is e else None)
+        return editor
+
+    def activate_document(self, doc):
+        self.editor = doc.editor
+        self.file = doc.path
+        self.saved = doc.saved
+        if hasattr(self,'code_stats'):
+            self.update_analysis()
+            self.update_cursor()
+
     def update_cursor(self):
         cursor = self.editor.textCursor()
         self.cursor_label.setText(f'Line {cursor.blockNumber()+1}  ·  Column {cursor.positionInBlock()+1}')
@@ -729,76 +736,58 @@ class Studio(QMainWindow):
         ]))
         self.code_warnings.setPlainText('\n'.join(metrics['warnings']) if metrics['warnings']
                                         else 'No lexical warnings. Static analysis is heuristic, not a proof of correctness.')
-        self.file_label.setText((self.file.name if self.file else 'untitled.pm') +
-                                ('  ● unsaved changes' if self.editor.toPlainText() != self.saved else ''))
+        doc = self.documents.current_document()
+        self.file_label.setText((doc.path.name if doc and doc.path else 'untitled.pm') +
+                                 ('  ● unsaved changes' if doc and doc.modified else ''))
 
     def maybe_save(self):
-        if self.editor.toPlainText() == self.saved:
-            return True
-        answer = QMessageBox.question(self,'Unsaved edits','Save the current source before continuing?',
-                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No|
-                QMessageBox.StandardButton.Cancel)
-        if answer == QMessageBox.StandardButton.Cancel:
-            return False
-        if answer == QMessageBox.StandardButton.Yes:
-            return self.save_file()
-        return True
+        return self.documents.maybe_save(self.documents.current_document())
 
     def new_file(self):
-        if self.maybe_save():
-            self.file = None
-            self.saved = ''
-            self.editor.setPlainText('')
-            self.nav.setCurrentRow(1)
+        self.documents.new_document('')
+        self.nav.setCurrentRow(1)
 
     def open_file(self):
-        if not self.maybe_save():
-            return
-        filename, _ = QFileDialog.getOpenFileName(self,'Open PlusMinus file',str(ROOT),'PlusMinus (*.pm);;All files (*)')
+        filename, _ = QFileDialog.getOpenFileName(
+            self,'Open PlusMinus file',str(ROOT),'PlusMinus (*.pm);;All files (*)')
         if filename:
             self.read_file(Path(filename))
 
     def read_file(self, path):
         try:
-            contents = path.read_text(encoding='utf-8-sig')
-        except (OSError,UnicodeError) as exc:
+            self.documents.open_path(path)
+        except (OSError, UnicodeError) as exc:
             self.error(f'Cannot open file: {exc}')
             return
-        self.editor.setPlainText(contents)
-        self.saved = contents
-        self.file = path
         self.settings.setValue('last_file', str(path))
         self.update_analysis()
         self.nav.setCurrentRow(1)
 
     def save_file(self):
-        if self.file is None:
-            filename, _ = QFileDialog.getSaveFileName(self,'Save PlusMinus file',str(ROOT/'main.pm'),'PlusMinus (*.pm)')
-            if not filename:
-                return False
-            self.file = Path(filename)
-        try:
-            source = self.editor.toPlainText()
-            self.file.write_text(source,encoding='utf-8')
-            self.saved = source
-            self.settings.setValue('last_file', str(self.file))
-            self.update_analysis()
-            self.statusBar().showMessage(f'Saved: {self.file}', 4000)
-            return True
-        except OSError as exc:
-            self.error(f'Cannot save: {exc}')
+        if not self.documents.save_current():
             return False
+        self.update_analysis()
+        self.statusBar().showMessage(f'Saved: {self.file}', 4000)
+        return True
 
     def restore_session(self):
         geometry = self.settings.value('geometry')
         if geometry:
             self.restoreGeometry(geometry)
-        filename = self.settings.value('last_file', '')
-        if filename and Path(str(filename)).is_file():
-            self.read_file(Path(str(filename)))
-        else:
-            self.saved = self.editor.toPlainText()
-            self.update_analysis()
+        pages = self.settings.value('workspace_pages', [0,1])
+        if isinstance(pages, (list,tuple)):
+            self.workspace.restore_pages(pages)
+        files = self.settings.value('open_files', [])
+        if not isinstance(files, (list,tuple)):
+            files = [files] if files else []
+        for item in files:
+            if item and Path(str(item)).is_file():
+                self.read_file(Path(str(item)))
+        if not files:
+            filename = self.settings.value('last_file','')
+            if filename and Path(str(filename)).is_file():
+                self.read_file(Path(str(filename)))
+        self.update_analysis()
 
     def record(self, category, label_text, source, report):
         metrics = report.get('metrics', {})
@@ -996,10 +985,8 @@ class Studio(QMainWindow):
     def open_test_source(self):
         selected = self.tests_table.currentRow()
         cases = self.test_cases()
-        if selected >= 0 and selected < len(cases) and self.maybe_save():
-            self.file = None
-            self.editor.setPlainText(cases[selected][0]['source'])
-            self.saved = self.editor.toPlainText()
+        if 0 <= selected < len(cases):
+            self.documents.new_document(cases[selected][0]['source'])
             self.nav.setCurrentRow(1)
 
     def update_resources(self):
@@ -1124,7 +1111,7 @@ class Studio(QMainWindow):
         if self.language_window and not self.language_window.confirm_leave():
             event.ignore()
             return
-        if not self.maybe_save():
+        if not self.documents.confirm_all():
             event.ignore()
             return
         self.cancel.set()
@@ -1136,6 +1123,8 @@ class Studio(QMainWindow):
                     event.ignore()
                     return
         self.settings.setValue('geometry',self.saveGeometry())
+        self.settings.setValue('workspace_pages',self.workspace.open_page_ids())
+        self.settings.setValue('open_files',self.documents.open_paths())
         event.accept()
 
 
