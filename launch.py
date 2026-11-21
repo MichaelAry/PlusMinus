@@ -257,6 +257,32 @@ def ensure_gui_python(*, install: bool) -> str:
     return str(candidate)
 
 
+def run_studio(python_executable: str, *, safe_mode: bool = False) -> None:
+    """Try native Qt startup; recover once from a Windows access violation."""
+    command = [str(python_executable), "-X", "faulthandler", str(IDE / "studio_qt.py")]
+    if safe_mode:
+        command.append("--safe-mode")
+    log("Running: " + " ".join(command))
+    try:
+        result = subprocess.run(command, cwd=str(ROOT), check=False)
+    except OSError as exc:
+        raise LaunchError(f"Could not start Qt/Python: {exc}") from exc
+    if result.returncode == 0:
+        return
+    # Windows NTSTATUS 0xC0000005 = access violation. Some subprocess layers
+    # return signed status codes, so compare via the lower 32 bits.
+    if (sys.platform == "win32" and not safe_mode
+            and (result.returncode & 0xffffffff) == 0xC0000005):
+        log("Windows access violation detected while showing the GUI.")
+        log("Retrying once in SAFE MODE: no saved dock layout, no startup tests, software rendering.")
+        log("Original Studio preferences remain unchanged.")
+        log("Diagnostic details: " + str(Path.home() / ".plusminus" / "studio-startup.log"))
+        return run_studio(python_executable, safe_mode=True)
+    raise LaunchError(
+        f"Qt Studio exited with code {result.returncode}. "
+        f"Diagnostic log: {Path.home() / '.plusminus' / 'studio-startup.log'}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build and run PlusMinus Studio on Windows, Linux, or macOS.")
     parser.add_argument("--yes", action="store_true", help="Approve system package installation without prompting")
@@ -265,6 +291,8 @@ def main() -> int:
     parser.add_argument("--build-only", action="store_true", help="Prepare the C++ runner without opening the GUI")
     parser.add_argument("--test", action="store_true", help="Run existing IDE smoke tests after preparing the runner")
     parser.add_argument("--rebuild", action="store_true", help="Force a fresh C++ build")
+    parser.add_argument("--safe-mode", action="store_true",
+                        help="Start Studio without stored layout, background startup tasks or hardware rendering")
     args = parser.parse_args()
     if sys.version_info < (3, 9):
         raise LaunchError("Python 3.9 or newer is required for source launch.")
@@ -283,7 +311,7 @@ def main() -> int:
         return 0
     if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         raise LaunchError("No graphical session detected (DISPLAY/WAYLAND_DISPLAY is unset).")
-    run([ensure_gui_python(install=not args.no_install), str(IDE / "studio_qt.py")])
+    run_studio(ensure_gui_python(install=not args.no_install), safe_mode=args.safe_mode)
     return 0
 
 

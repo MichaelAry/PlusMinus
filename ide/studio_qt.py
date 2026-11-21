@@ -14,6 +14,9 @@ import subprocess
 import statistics
 import sys
 import threading
+from startup_diagnostics import begin as begin_startup, mark as startup_mark, safe_mode_requested, log_exception
+begin_startup()
+startup_mark("Loading PySide6 and Studio modules")
 from collections import Counter
 from pathlib import Path
 
@@ -43,6 +46,7 @@ from git_view import GitPanel
 from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
 from execution_report import render_output, render_details
+startup_mark("PySide6 and Studio modules imported")
 
 try:
     import psutil
@@ -463,16 +467,20 @@ class NativeTestJob(QThread):
 
 class Studio(QMainWindow):
     def __init__(self):
+        startup_mark("Studio.__init__: begin")
         super().__init__()
+        self.safe_mode = safe_mode_requested()
         self.settings = QSettings('PlusMinus', 'Studio4')
-        # Preserve open files, geometry and existing preferences from Studio 3.
-        previous_settings = QSettings('PlusMinus', 'Studio2')
-        for setting in ('geometry', 'workspace_pages', 'open_files',
-                        'split_editor', 'last_file'):
-            if self.settings.value(setting) is None:
-                old_value = previous_settings.value(setting)
-                if old_value is not None:
-                    self.settings.setValue(setting, old_value)
+        # In safe mode never alter, migrate or restore the user's saved layout.
+        if not self.safe_mode:
+            previous_settings = QSettings('PlusMinus', 'Studio2')
+            for setting in ('geometry', 'workspace_pages', 'open_files',
+                            'split_editor', 'last_file'):
+                if self.settings.value(setting) is None:
+                    old_value = previous_settings.value(setting)
+                    if old_value is not None:
+                        self.settings.setValue(setting, old_value)
+        startup_mark(f"Studio.__init__: settings ready; safe_mode={self.safe_mode}")
         self.history = HistoryStore()
         self.runner = find_runner()
         self.language_window = None
@@ -487,6 +495,7 @@ class Studio(QMainWindow):
         self.native_runner = find_native_runner()
         self.native_cases = []
         self.native_history = NativeHistory()
+        startup_mark("Studio.__init__: history and native test storage ready")
         self.last_native_session = None
         self.jobs = []
         self.cancel = threading.Event()
@@ -499,15 +508,22 @@ class Studio(QMainWindow):
         self.resize(1440, 885)
         self.setMinimumSize(1010, 680)
         self.setStyleSheet(STYLE)
+        startup_mark("Studio.__init__: building Research Workbench widgets")
         self.make_shell()
-        self.load_user_tests()
-        self.restore_session()
+        startup_mark("Studio.__init__: shell built")
+        if not self.safe_mode:
+            self.load_user_tests()
+            startup_mark("Studio.__init__: restoring saved documents and dock layout")
+            self.restore_session()
+            startup_mark("Studio.__init__: session restored")
         self.update_analysis()
-        self.refresh_history()
-        self.statusBar().showMessage('Ready — startup regression suite scheduled')
+        if not self.safe_mode:
+            self.refresh_history()
+        self.statusBar().showMessage(
+            'Safe mode: saved layouts and background startup jobs disabled'
+            if self.safe_mode else 'Ready — startup regression suite scheduled')
         self.resource_timer = QTimer(self)
         self.resource_timer.timeout.connect(self.update_resources)
-        self.resource_timer.start(900)
         self.analysis_timer = QTimer(self)
         self.analysis_timer.setSingleShot(True)
         self.analysis_timer.setInterval(300)
@@ -516,8 +532,11 @@ class Studio(QMainWindow):
         self.diagnostic_timer.setSingleShot(True)
         self.diagnostic_timer.setInterval(650)
         self.diagnostic_timer.timeout.connect(self.request_compile_diagnostics)
-        QTimer.singleShot(450, self.auto_tests)
-        QTimer.singleShot(1200, self.discover_native)
+        if not self.safe_mode and '--gui-smoke' not in sys.argv:
+            self.resource_timer.start(900)
+            QTimer.singleShot(450, self.auto_tests)
+            QTimer.singleShot(1200, self.discover_native)
+        startup_mark("Studio.__init__: complete")
 
     def make_shell(self):
         # Preserve existing execution/test methods; replace only the GUI layout.
@@ -1894,6 +1913,7 @@ class Studio(QMainWindow):
             self.error(f'Export failed: {exc}')
 
     def closeEvent(self, event):
+        startup_mark("Studio.closeEvent: begin")
         if self.language_window and not self.language_window.confirm_leave():
             event.ignore()
             return
@@ -1911,6 +1931,11 @@ class Studio(QMainWindow):
                     self.error('An active task is still shutting down. Try closing again.')
                     event.ignore()
                     return
+        if self.safe_mode:
+            # A diagnostic session must never overwrite a known-good layout.
+            startup_mark("Studio.closeEvent: safe mode; saved settings unchanged")
+            event.accept()
+            return
         self.settings.setValue('geometry',self.saveGeometry())
         self.settings.setValue('workspace_pages',self.workspace.open_page_ids())
         self.settings.setValue('open_files',self.documents.open_paths())
@@ -1938,12 +1963,56 @@ def self_test():
 def main():
     if '--self-test' in sys.argv:
         return self_test()
-    app = QApplication(sys.argv)
+    safe = safe_mode_requested()
+    if safe:
+        # Use conservative raster/software rendering when troubleshooting an
+        # access violation. Do not change the user's OS-wide Qt configuration.
+        os.environ.setdefault('QT_OPENGL', 'software')
+        os.environ.setdefault('QSG_RHI_BACKEND', 'software')
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
+    argv = [arg for arg in sys.argv
+            if arg not in ('--safe-mode', '--qt-probe', '--gui-smoke')]
+    startup_mark("main: creating QApplication")
+    app = QApplication(argv)
+    startup_mark("main: QApplication initialized")
     app.setApplicationName('PlusMinus Studio')
     app.setOrganizationName('PlusMinus')
-    window = Studio()
-    window.show()
-    return app.exec()
+    if '--qt-probe' in sys.argv:
+        # Isolate the native Qt platform plugin and display driver from all
+        # Studio widgets and persistent project settings.
+        from PySide6.QtWidgets import QLabel
+        probe = QLabel("PlusMinus / native Qt window probe")
+        probe.resize(480, 140)
+        startup_mark("main: showing minimal Qt widget")
+        probe.show()
+        app.processEvents()
+        startup_mark("main: minimal Qt widget displayed")
+        probe.hide()
+        app.processEvents()
+        return 0
+    try:
+        startup_mark("main: constructing Studio window")
+        window = Studio()
+        startup_mark("main: calling window.show()")
+        window.show()
+        startup_mark("main: window.show() returned")
+        app.processEvents()
+        startup_mark("main: initial Qt events processed")
+        if '--gui-smoke' in sys.argv:
+            # Native QWidget.show() + initial paint/layout events have already
+            # succeeded. Do not depend on a hosted CI runner's interactive
+            # desktop session to drive QApplication.exec() and a timer.
+            startup_mark("main: GUI smoke rendered successfully")
+            window.hide()
+            app.processEvents()
+            return 0
+        startup_mark("main: entering Qt event loop")
+        result = app.exec()
+        startup_mark(f"main: Qt event loop exited with code {result}")
+        return result
+    except Exception as exc:
+        log_exception(exc)
+        raise
 
 
 if __name__ == '__main__':
