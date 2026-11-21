@@ -7,6 +7,7 @@ on:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
       - 'scripts/verify-native-isolation.mjs'
+      - 'scripts/smoke-packaged-linux.sh'
       - 'scripts/check-qt-native-parity.py'
       - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
@@ -20,6 +21,7 @@ on:
       - 'apps/studio/**'
       - 'scripts/stage-native.mjs'
       - 'scripts/verify-native-isolation.mjs'
+      - 'scripts/smoke-packaged-linux.sh'
       - 'scripts/check-qt-native-parity.py'
       - 'docs/migration/**'
       - '.github/workflows/studio5.yml'
@@ -129,6 +131,10 @@ jobs:
       - name: Tauri package
         working-directory: apps/studio
         run: npm run tauri build
+
+      - name: Smoke installed-layout Linux sidecars and GUI startup
+        if: runner.os == 'Linux'
+        run: bash scripts/smoke-packaged-linux.sh
 
       - name: Verify package output
         shell: bash
