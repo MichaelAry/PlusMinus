@@ -43,7 +43,15 @@ export function validateNotebook(parsed: unknown): Notebook {
   if (n.nbformat !== 4 || !Array.isArray(n.cells) || n.cells.length > 2000) throw new Error("Only Jupyter v4 notebooks with ≤2000 cells");
   if (n.metadata?.kernelspec?.name && !n.metadata.kernelspec.name.startsWith("plusminus")) throw new Error("Notebook kernel is not PlusMinus");
   if (n.metadata?.language_info?.name && n.metadata.language_info.name !== "plusminus") throw new Error("Notebook language is not PlusMinus");
-  if (!n.metadata || typeof n.metadata !== "object" || Array.isArray(n.metadata)) n.metadata = {};
+  if (n.metadata === undefined) n.metadata = {};
+  if (!n.metadata || typeof n.metadata !== "object" || Array.isArray(n.metadata))
+    throw new Error("Notebook metadata must be an object");
+  if (n.metadata.kernelspec !== undefined &&
+      (!n.metadata.kernelspec || typeof n.metadata.kernelspec !== "object" || Array.isArray(n.metadata.kernelspec)))
+    throw new Error("Notebook kernelspec must be an object");
+  if (n.metadata.language_info !== undefined &&
+      (!n.metadata.language_info || typeof n.metadata.language_info !== "object" || Array.isArray(n.metadata.language_info)))
+    throw new Error("Notebook language_info must be an object");
   const ids = new Set<string>();
   for (const cell of n.cells) {
     if (!cell || typeof cell !== "object") throw new Error("Notebook cell must be an object");
@@ -57,7 +65,9 @@ export function validateNotebook(parsed: unknown): Notebook {
       cell.id = next;
     }
     ids.add(cell.id);
-    if (!cell.metadata || typeof cell.metadata !== "object" || Array.isArray(cell.metadata)) cell.metadata = {};
+    if (cell.metadata === undefined) cell.metadata = {};
+    if (!cell.metadata || typeof cell.metadata !== "object" || Array.isArray(cell.metadata))
+      throw new Error("Notebook cell metadata must be an object");
     if (cell.cell_type === "code") {
       if (cell.execution_count === undefined) cell.execution_count = null;
       if (cell.outputs === undefined) cell.outputs = [];

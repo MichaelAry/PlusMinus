@@ -9,6 +9,11 @@ describe("notebook v4 compatibility",()=>{
     expect(loaded.metadata.custom).toEqual({anything:true});
     expect(loaded.cells).toHaveLength(2);
   });
+  it("rejects corrupted metadata rather than silently discarding data",()=>{
+    const n=freshNotebook();
+    (n as unknown as {metadata:unknown}).metadata="corrupt";
+    expect(()=>validateNotebook(n)).toThrow(/metadata/);
+  });
   it("rejects foreign kernels and unexpected cell kinds",()=>{
     const n=freshNotebook();
     n.metadata.kernelspec!.name="python3";
