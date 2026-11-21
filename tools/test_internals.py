@@ -31,16 +31,25 @@ class LanguageInternalsTests(unittest.TestCase):
         self.assertIsNone(keyword_at('while',-1))
         self.assertIsNone(keyword_at('while',5))
 
+    def test_repository_targets_resolve(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in SYMBOLS:
+            for target in source_targets(name):
+                path, line = locate_target(root, target)
+                self.assertTrue(path.is_file(), name)
+                self.assertGreater(line, 0, name)
+
     def test_source_anchor_and_sandbox(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
-            (root/'Parser.cpp').write_text('a\nb\nvoid Compiler::parseIf() {}\n')
-            target=SourceTarget('Parser.cpp','void Compiler::parseIf()','Compiler')
+            (root/'src/compiler').mkdir(parents=True)
+            (root/'src/compiler/statements.cpp').write_text('a\nb\nvoid Compiler::parseIf() {}\n')
+            target=SourceTarget('src/compiler/statements.cpp','void Compiler::parseIf()','Compiler')
             self.assertEqual(locate_target(root,target)[1],3)
             with self.assertRaises(ValueError):
                 locate_target(root,SourceTarget('../outside.txt','x','Invalid'))
             with self.assertRaises(ValueError):
-                locate_target(root,SourceTarget('Parser.cpp','no such target','Invalid'))
+                locate_target(root,SourceTarget('src/compiler/statements.cpp','no such target','Invalid'))
             self.assertFalse(editable_checkout(root))
 
 

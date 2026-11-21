@@ -40,7 +40,7 @@ class LanguageSourceWindow(QMainWindow):
     sourceSaved = Signal(str)
     rebuildRequested = Signal()
     CORE = (
-        SourceTarget('Parser.h', 'enum class OpCode', 'VM value types and opcodes'),
+        SourceTarget('include/plusminus/bytecode.hpp', 'enum class OpCode', 'VM value types and opcodes'),
         SourceTarget('ide/runner.cpp', 'int main(', 'Runner / JSON protocol'),
     )
 

@@ -21,11 +21,18 @@ class LanguageSymbol:
 
 
 def compiler(anchor):
-    return SourceTarget('Parser.cpp', anchor, 'Compiler / syntax')
+    if anchor.startswith('void Compiler::parseOperand'):
+        file = 'src/compiler/expressions.cpp'
+    elif anchor.startswith('void Compiler::parse') and anchor.split('::parse', 1)[1].startswith(
+        ('Expr', 'Compare', 'Sum', 'Term', 'Factor')):
+        file = 'src/compiler/expressions.cpp'
+    else:
+        file = 'src/compiler/statements.cpp'
+    return SourceTarget(file, anchor, 'Compiler / syntax')
 
 
 def runtime(anchor):
-    return SourceTarget('Parser.cpp', anchor, 'VM / execution')
+    return SourceTarget('src/vm/executor.cpp', anchor, 'VM / execution')
 
 
 SYMBOLS = {
@@ -99,7 +106,17 @@ def source_targets(keyword: str) -> tuple[SourceTarget, ...]:
 def locate_target(root: Path, target: SourceTarget) -> tuple[Path, int]:
     root = Path(root).resolve()
     path = (root / target.file).resolve()
-    allowed = {root/'Parser.cpp', root/'Parser.h', root/'ide'/'runner.cpp'}
+    allowed = {
+        (root / item).resolve() for item in (
+            'Parser.h', 'ide/runner.cpp',
+            'include/plusminus/value.hpp', 'include/plusminus/bytecode.hpp',
+            'include/plusminus/compiler.hpp', 'include/plusminus/vm.hpp',
+            'include/plusminus/api.hpp',
+            'src/compiler/compiler.cpp', 'src/compiler/scanner.cpp',
+            'src/compiler/statements.cpp', 'src/compiler/expressions.cpp',
+            'src/vm/vm.cpp', 'src/vm/executor.cpp', 'src/api.cpp',
+        )
+    }
     if path not in allowed:
         raise ValueError('Editing is restricted to interpreter C++ source files')
     if not path.is_file():
@@ -112,4 +129,4 @@ def locate_target(root: Path, target: SourceTarget) -> tuple[Path, int]:
 
 
 def editable_checkout(root: Path) -> bool:
-    return all((Path(root)/p).is_file() for p in ('Parser.cpp', 'Parser.h', 'ide/runner.cpp', 'launch.py'))
+    return all((Path(root)/p).is_file() for p in ('include/plusminus/api.hpp', 'src/compiler/statements.cpp', 'src/vm/executor.cpp', 'ide/runner.cpp', 'launch.py'))

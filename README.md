@@ -106,3 +106,16 @@ toolbar button. Native source editing needs the checked-out project sources,
 CMake, and a C++20 compiler; standalone prebuilt binaries cannot edit the
 embedded interpreter. The editor does not hot-patch a running VM: changes
 take effect after saving and successfully rebuilding.
+
+
+## Modular C++ core
+
+The C++20 interpreter now lives in `include/plusminus/` and `src/` and is built as a single static `plusminus_core` library. `Parser.h` remains as a compatibility header; `Parser.cpp` is removed. The runner is a separate executable linking the same library.
+
+```sh
+cmake -S . -B ide/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ide/build --config Release
+ctest --test-dir ide/build -C Release --output-on-failure
+```
+
+The source launcher keeps the original double-click workflow. `Ctrl+click` in Studio 2.0 navigates to the compiler, VM and bytecode source files at their new locations. The Visual Studio native unit tests are grouped under `tests/cpp/` while retaining their original `TEST_CLASS` and `TEST_METHOD` definitions.

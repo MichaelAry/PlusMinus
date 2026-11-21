@@ -18,7 +18,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 IDE = ROOT / "ide"
 BUILD = IDE / "build"
-SOURCES = (ROOT / "Parser.cpp", ROOT / "Parser.h", IDE / "runner.cpp", IDE / "CMakeLists.txt")
+# Track every core translation unit/header, including files created by Language Internals.
+SOURCES = tuple(sorted([
+    ROOT / "CMakeLists.txt", ROOT / "Parser.h", IDE / "runner.cpp", IDE / "CMakeLists.txt",
+    *(ROOT / "src").rglob("*.cpp"), *(ROOT / "src").rglob("*.hpp"),
+    *(ROOT / "include").rglob("*.hpp"),
+]))
 
 
 class LaunchError(RuntimeError):
@@ -204,7 +209,7 @@ def build_runner(*, install: bool, agree: bool, rebuild: bool) -> Path:
     cmake = find_cmake()
     if cmake is None:
         raise LaunchError("CMake cannot be found after installation.")
-    configure = [cmake, "-S", str(IDE), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"]
+    configure = [cmake, "-S", str(ROOT), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"]
     # CMake's default generator chooses Visual Studio when available on Windows,
     # and a platform-native Make/Ninja generator on Linux/macOS.
     run(configure)

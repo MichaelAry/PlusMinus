@@ -1,10 +1,4 @@
+# Compatibility entry point for existing scripts invoking cmake -S ide.
 cmake_minimum_required(VERSION 3.16)
 project(PlusMinusIDE LANGUAGES CXX)
-find_package(Threads REQUIRED)
-add_executable(plusminus_runner runner.cpp ../Parser.cpp)
-target_include_directories(plusminus_runner PRIVATE ..)
-target_compile_features(plusminus_runner PRIVATE cxx_std_20)
-target_link_libraries(plusminus_runner PRIVATE Threads::Threads)
-if(MSVC)
-  target_compile_options(plusminus_runner PRIVATE /utf-8)
-endif()
+add_subdirectory(.. "${CMAKE_CURRENT_BINARY_DIR}/plusminus-root")
