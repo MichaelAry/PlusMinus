@@ -17,7 +17,7 @@ monaco.languages.setLanguageConfiguration("plusminus", {
     {open:'"',close:'"'}
   ]
 });
-// Monaco's standard Find, Format and Toggle Line Comment commands now use
+// Monaco's standard Find and Toggle Line Comment commands now use
 // the registered PlusMinus language configuration, without a custom editor.
 monaco.languages.registerCompletionItemProvider("plusminus", {
   provideCompletionItems(model, position) {

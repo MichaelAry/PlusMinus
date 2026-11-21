@@ -4,10 +4,11 @@ use rusqlite::{backup::Backup, params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{fs, io::Write, path::{Path, PathBuf}, sync::Mutex, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{fs, io::Write, path::{Path, PathBuf}, sync::{Mutex,atomic::{AtomicBool,Ordering}}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 // Guard simultaneous first-use calls from multiple Tauri worker threads.
 static DB_INITIALIZE_LOCK: Mutex<()> = Mutex::new(());
+static USER_DB_READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativeResult {
@@ -71,7 +72,17 @@ fn verify(db: &Connection) -> Result<(), String> {
 }
 
 pub fn initialize() -> Result<PathBuf, String> {
-    initialize_at(path_v5()?)
+    let dest=path_v5()?;
+    // Only migrate/integrity-check on the first successful use of the user DB
+    // in this process. Rechecking the full database for every history query is
+    // expensive on large Qt histories and may stall unrelated Tokio workers.
+    if USER_DB_READY.load(Ordering::Acquire) {
+        if dest.is_file() { return Ok(dest); }
+        return Err("Studio 5 history database disappeared during this session".into());
+    }
+    let result=initialize_at(dest)?;
+    USER_DB_READY.store(true,Ordering::Release);
+    Ok(result)
 }
 
 fn initialize_at(dest: PathBuf) -> Result<PathBuf, String> {
@@ -199,7 +210,10 @@ fn platform_tag(os: &str) -> &str {
 
 fn connect() -> Result<Connection, String> {
     let path = initialize()?;
-    Connection::open(path).map_err(|e| e.to_string())
+    let db=Connection::open(path).map_err(|e|e.to_string())?;
+    db.busy_timeout(Duration::from_secs(12)).map_err(|e|e.to_string())?;
+    checked_schema_version(&db)?;
+    Ok(db)
 }
 
 pub fn overview() -> Result<Value, String> {
@@ -557,7 +571,7 @@ mod tests {
             std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir_all(&folder).unwrap();
         let destination=folder.join("studio-v5.db");
-        let handles:(Vec<_>)=(0..5).map(|_|{
+        let handles: Vec<_> = (0..5).map(|_|{
             let copy=destination.clone();
             std::thread::spawn(move||initialize_at(copy))
         }).collect();
