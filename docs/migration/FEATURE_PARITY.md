@@ -45,6 +45,13 @@ execution must substantiate DONE. Do not invent measurements or CI results.
 - [ ] Cancel and timeout stop the process (no orphaned process).
 - [ ] Unmodified C++ sources and CMake verified with git diff.
 
-## Stage 2 implementation status
+## Stage 2 evidence matrix (DONE / PARTIAL / BLOCKED)
 
-Detailed evidence: docs/migration/STAGE2_STATUS.md. Stage 2 is a separate Draft PR until CI and real GUI parity checks are complete. C++/Qt remain unchanged. Stage 1 CODE status is not an acceptance claim for Stage 2.
+For up-to-date feature-level evidence, see
+[STAGE2_STATUS.md](STAGE2_STATUS.md). As of this branch, protected C++/Qt source
+preservation is DONE by Git comparison; native Test Lab, notebooks, history,
+editor, analysis, profiling, Git, Language Internals and Qt-settings export
+remain PARTIAL until the latest CI and real desktop smoke tests are complete.
+Live VM stepping/breakpoints, persistent cross-cell VM state and structured
+native AST are BLOCKED by the unchanged C++ runner contract. This is not the
+Stage 3 cutover.

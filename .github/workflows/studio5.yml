@@ -52,6 +52,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify C++ core and Qt files remain unchanged
+        shell: bash
+        run: |
+          git fetch --no-tags origin master --depth=1
+          git diff --exit-code origin/master HEAD -- \
+            src/ include/ ide/ tests/cpp/ tests/portable/ \
+            CMakeLists.txt launch.py .github/workflows/desktop.yml
+
       - name: Install Linux Tauri prerequisites
         if: runner.os == 'Linux'
         run: |

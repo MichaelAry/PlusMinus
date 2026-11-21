@@ -65,3 +65,24 @@ that the current C++ binary can accept JSON-RPC or live debug commands.
 - resource_snapshot: observed host Rust process RSS/CPU only. The WebView and C++ child-process metrics are not included in this sample.
 
 No public shell command is granted to JavaScript, no native VM live stepping, no persistent cross-cell kernel and no genuine structured AST output.
+
+## Stage 2 TaskRegistry contract
+
+- \`task_snapshot({jobId})\` -> nullable
+  \`{job_id,kind,status,done,total,passed,failed,session_id,error,created_at_ms}\`.
+- \`list_tasks()\` -> snapshots sorted newest first. Task statuses:
+  \`running\`, \`cancel_requested\`, \`completed\`, \`canceled\`, \`error\`.
+- \`cancel_run({jobId})\` requests cancellation for source executions and
+  independent native test suites. Cancellation is best-effort process kill;
+  structured "canceled" status is not a native C++ response.
+- Registry snapshots survive a Dockview panel unmount and can be reloaded by
+  another pane in the same process. Completed test results are persisted in
+  \`studio-v5.db\`; the active TaskRegistry itself does NOT survive app restart.
+- Native test progress is delivered through a Tauri Channel per completed
+  test, never per C++ VM instruction. A detached UI can poll snapshots.
+- Source fingerprint of new native sessions reproduces Studio 4's per-parent
+  ordered path+byte SHA256 on the host OS; legacy metadata is copied unchanged.
+
+Source/runner protocols remain distinct: \`plusminus_runner\` consumes raw
+UTF-8 stdin until EOF, no JSON-RPC; \`plusminus_native_tests\` consumes argv
+\`--list\` or \`--run ID\` and writes JSON Lines.
