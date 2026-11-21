@@ -44,3 +44,7 @@ hardware comparison against Studio 4 is present in this branch. No numerical
 performance claim may be made until raw scripts and measurements are checked
 on the same machine and identical C++ binary. CI packaging alone does not
 measure UI responsiveness or installed launch success.
+
+## Automated pre-cutover startup validation
+
+PR #21 adds scripts/smoke-packaged-linux.sh to inspect the actual packaged .deb layout, execute embedded C++ runner and test sidecars and smoke the Linux GUI process under Xvfb for eight seconds. This is NOT an end-to-end GUI interaction or performance benchmark. A distinct script executes 225 C++ tests each in its own process in CI. Cross-OS installed performance measurements remain required in Stage 3.

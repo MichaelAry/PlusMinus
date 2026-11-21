@@ -59,3 +59,7 @@ Stage 3 cutover.
 ## Stage 2 trace and history improvements
 
 An interactive, virtualized post-execution trace replay preserves the native 5000-event cap. The History panel can stream complete SQLite history into a new CSV or JSON file. A differential smoke check compares Studio 4's Python adapter against the unchanged C++ runner in CI. These features remain PARTIAL until all cross-platform and GUI checks pass.
+
+## Pre-cutover hardening
+
+PR #21 addresses notebook legacy cell IDs, dirty panel drafts, active notebook Save, globally bounded native tests, capped streams, exact IPC exit codes, Qt-compatible SQLite metadata, C++ build-source hash manifests and cross-OS verification of all 225 native C++ tests. Automated test presence does not establish installed desktop parity. See PRE_CUTOVER_VERIFICATION.md.

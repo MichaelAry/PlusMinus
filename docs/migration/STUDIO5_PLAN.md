@@ -113,3 +113,7 @@ against Qt's output, history and file fixtures, as detailed in
 [STAGE2_STATUS.md](STAGE2_STATUS.md). New UI modules without run evidence
 are PARTIAL, not DONE. The third stage begins only after Stage 2 parity
 criteria are satisfied and reviewed.
+
+## Stage 2 pre-cutover hardening
+
+PR #21 repairs verified defects in notebooks, SQLite history comparisons, C++ source freshness, IPC exit handling and globally bounded native tests while keeping the original Qt/C++ code unchanged. Stage 3 can only begin after the checks in PRE_CUTOVER_VERIFICATION.md are satisfied, including real installed GUI workflows, nonempty user DB fixtures and raw performance comparisons.

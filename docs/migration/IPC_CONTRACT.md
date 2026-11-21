@@ -90,3 +90,7 @@ UTF-8 stdin until EOF, no JSON-RPC; \`plusminus_native_tests\` consumes argv
 ## Complete history export
 
 `export_history({format: "csv" | "json"})` presents a native save dialog. The destination must not already exist. The streaming exporter reads only `studio-v5.db` and leaves `studio.db` untouched; CSV output escapes quotes and guards spreadsheet formula interpretation. There is no 1000-record UI limit on exported data.
+
+## Pre-cutover C++ build and worker contract
+
+Native sidecars are staged with a source-fingerprint.json manifest (SHA256 of source/header/test/compiler build inputs). If a selected PlusMinus checkout differs from the embedded fingerprint, native execution and test discovery are blocked until the checkout is rebuilt. Sources are fingerprinted before and after CMake rebuild; a concurrent edit invalidates the result. The historical Qt session source_hash remains separate. All concurrently started native suites share a global two-permit Tokio semaphore. Each process streams bounded stdout/stderr before exit; cancellation is best-effort child termination, not a full process-tree sandbox. The C++ one-shot runner accepts exit 0/ok=true or exit 1/ok=false only, never exit 2 as a valid language diagnostic.
