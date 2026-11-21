@@ -277,7 +277,8 @@ def build_research_shell(host, root):
     notebook_root = (Path.home() / "Documents") if getattr(sys, "frozen", False) else root
     if not notebook_root.is_dir():
         notebook_root = Path.home()
-    host.notebooks = NotebookView(notebook_root, host)
+    host.notebooks = NotebookView(notebook_root, host,
+                                  runner_provider=lambda: host.runner)
     host.notebooks.statusChanged.connect(host.statusBar().showMessage)
     host.workspace.register_page("Notebooks", host.notebooks)
     frame.addWidget(host.workspace, 1)

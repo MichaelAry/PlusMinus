@@ -196,9 +196,12 @@ class NotebookCell(QFrame):
 class NotebookView(QWidget):
     statusChanged = Signal(str)
 
-    def __init__(self, root, parent=None):
+    def __init__(self, root, parent=None, runner_provider=None):
         super().__init__(parent)
         self.root = Path(root)
+        # Use the Studio controller's validated runner to avoid stale native
+        # executables after editing the interpreter's C++ implementation.
+        self.runner_provider = runner_provider or find_runner
         self.path = None
         self.notebook = new_notebook()
         self.cells = []
@@ -420,7 +423,7 @@ class NotebookView(QWidget):
         if not self.run_queue:
             self.status.setText("Kernel: isolated · idle")
             return
-        runner = find_runner()
+        runner = self.runner_provider()
         if runner is None:
             self.run_queue.clear()
             self.status.setText("C++ runner unavailable: rebuild the project first.")

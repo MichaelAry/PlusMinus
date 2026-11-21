@@ -188,6 +188,9 @@ window.language_window.auto_build.setChecked(False)
 window.language_source_saved('synthetic changed C++ source')
 assert window.native_stale and window.runner is None
 assert window.native_runner is None
+window.notebooks.run_cell(first)
+assert window.notebooks.worker is None, 'Notebook must not execute a stale VM'
+assert 'unavailable' in window.notebooks.status.text()
 window.language_window.close()
 window.saved = window.editor.toPlainText()  # No unsaved-edit dialog in a headless test.
 window.close()
