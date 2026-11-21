@@ -34,6 +34,9 @@ from internals import keyword_at, editable_checkout
 from language_window import LanguageSourceWindow
 from workspace import WorkspaceTabs
 from documents import DocumentTabs
+from native_test_view import NativeTestPanel
+from highlighting import CppHighlighter
+from native_tests import NativeHistory, find_native_runner, discover_native_tests, run_native_case
 from highlighting import PlusMinusHighlighter
 
 try:
@@ -308,6 +311,30 @@ class Job(QThread):
             self.failed.emit(f'{type(exc).__name__}: {exc}')
 
 
+class NativeTestJob(QThread):
+    """One subprocess per test with live progress signals."""
+    progress = Signal(object)
+    completed = Signal(object)
+
+    def __init__(self, executable, cases, cancel):
+        super().__init__()
+        self.executable = executable
+        self.cases = list(cases)
+        self.cancel = cancel
+
+    def run(self):
+        results = []
+        for case in self.cases:
+            if self.cancel.is_set():
+                break
+            result = run_native_case(
+                self.executable, case, self.cancel,
+                timeout=180 if case.get('slow') else 20)
+            results.append(result)
+            self.progress.emit(result)
+        self.completed.emit(results)
+
+
 class Studio(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -322,6 +349,10 @@ class Studio(QMainWindow):
         self.last_tests = []
         self.last_benchmark = {}
         self.user_tests = []
+        self.native_runner = find_native_runner()
+        self.native_cases = []
+        self.native_history = NativeHistory()
+        self.last_native_session = None
         self.jobs = []
         self.cancel = threading.Event()
         self.gui_samples = []
@@ -348,6 +379,7 @@ class Studio(QMainWindow):
         self.analysis_timer.setInterval(300)
         self.analysis_timer.timeout.connect(self.update_analysis)
         QTimer.singleShot(450, self.auto_tests)
+        QTimer.singleShot(1200, self.discover_native)
 
     def make_shell(self):
         central = QWidget()
@@ -503,29 +535,40 @@ class Studio(QMainWindow):
         return page_widget
 
     def make_tests(self):
-        page_widget, layout = page('Test Center', 'Startup diagnostics · regression suites · expected output verification')
+        page_widget, layout = page(
+            'Test Laboratory', 'Portable C++ tests · PlusMinus checks · Git baselines')
+        suites = QTabWidget()
+        embedded = QWidget()
+        built_layout = QVBoxLayout(embedded)
         controls = QHBoxLayout()
-        self.test_summary = label('Waiting for built-in test suite',style='muted')
+        self.test_summary = label('Waiting for built-in test suite', style='muted')
         controls.addWidget(self.test_summary,1)
         controls.addWidget(button('Add current source', self.add_test))
         controls.addWidget(button('Import JSON', self.import_tests))
         controls.addWidget(button('Export JSON', self.export_tests))
         controls.addWidget(button('Run selected', self.run_selected_test))
         controls.addWidget(button('Run all', self.start_tests, primary=True))
-        layout.addLayout(controls)
+        built_layout.addLayout(controls)
         self.test_progress = QProgressBar()
         self.test_progress.setRange(0,100)
-        layout.addWidget(self.test_progress)
-        frame, col = panel()
+        built_layout.addWidget(self.test_progress)
         self.tests_table = table(['Name', 'Suite', 'Result', 'Execution', 'Details'])
         self.tests_table.doubleClicked.connect(self.open_test_source)
-        col.addWidget(self.tests_table)
-        layout.addWidget(frame, 1)
+        built_layout.addWidget(self.tests_table,1)
         self.test_details = QPlainTextEdit()
         self.test_details.setReadOnly(True)
-        self.test_details.setPlaceholderText('Failed tests and exact expected/actual values are shown here.')
         self.test_details.setMaximumHeight(145)
-        layout.addWidget(self.test_details)
+        built_layout.addWidget(self.test_details)
+        suites.addTab(embedded, 'PlusMinus & user tests')
+        self.native_panel = NativeTestPanel()
+        self.native_panel.runRequested.connect(self.start_native_tests)
+        self.native_panel.baselineRequested.connect(self.set_native_baseline)
+        self.native_panel.compareRequested.connect(self.compare_native_baseline)
+        self.native_panel.refreshRequested.connect(self.discover_native)
+        self.native_panel.openSourceRequested.connect(self.open_native_source)
+        suites.addTab(self.native_panel, 'Native C++ test suite')
+        layout.addWidget(suites,1)
+        self.test_suites = suites
         self.refresh_test_table()
         return page_widget
 
@@ -695,6 +738,7 @@ class Studio(QMainWindow):
         self.engine_status.setText('● Runtime rebuilt')
         self.statusBar().showMessage('C++ interpreter rebuilt. Rerunning built-in tests.',10000)
         self.start_tests(startup=True)
+        self.discover_native()
 
     def make_source_editor(self):
         editor = CodeEditor()
@@ -703,6 +747,7 @@ class Studio(QMainWindow):
         font.setStyleHint(QFont.StyleHint.Monospace)
         editor.setFont(font)
         editor._highlighter = Syntax(editor.document())
+        editor._syntax_kind = 'pm'
         editor.cursorPositionChanged.connect(
             lambda e=editor: self.update_cursor() if getattr(self,'editor',None) is e else None)
         editor.definitionRequested.connect(self.open_language_internals)
@@ -715,6 +760,13 @@ class Studio(QMainWindow):
         self.editor = doc.editor
         self.file = doc.path
         self.saved = doc.saved
+        is_cpp = bool(doc.path and doc.path.suffix.lower() in ('.cpp','.h','.hpp'))
+        current_kind = getattr(doc.editor, '_syntax_kind', 'pm')
+        expected_kind = 'cpp' if is_cpp else 'pm'
+        if current_kind != expected_kind:
+            doc.editor._highlighter.setDocument(None)
+            doc.editor._highlighter = CppHighlighter(doc.editor.document()) if is_cpp else Syntax(doc.editor.document())
+            doc.editor._syntax_kind = expected_kind
         if hasattr(self,'code_stats'):
             self.update_analysis()
             self.update_cursor()
@@ -988,6 +1040,115 @@ class Studio(QMainWindow):
         if 0 <= selected < len(cases):
             self.documents.new_document(cases[selected][0]['source'])
             self.nav.setCurrentRow(1)
+
+    def discover_native(self):
+        self.native_runner = find_native_runner()
+        if self.native_runner is None:
+            self.native_panel.summary.setText(
+                'Native C++ runner missing — rebuild CMake project to enable all 225 tests')
+            return
+        self.spawn(
+            lambda: discover_native_tests(self.native_runner),
+            self.native_discovered, 'Native C++ test discovery')
+
+    def native_discovered(self, cases):
+        self.native_cases = cases
+        self.native_panel.set_cases(cases)
+        previous = self.native_history.recent(1)
+        if previous:
+            self.last_native_session = previous[0]['id']
+            self.native_panel.summary.setText(
+                f"{len(cases)} C++ tests available · previous session #{self.last_native_session}")
+            for record in self.native_history.results(self.last_native_session).values():
+                self.native_panel.last_results[record['id']] = record
+            self.native_panel.populate()
+
+    def start_native_tests(self, selection='quick'):
+        if not self.native_runner or not self.native_cases:
+            self.error('Native C++ tests unavailable. Build with CMake first.')
+            return
+        if any(job.isRunning() for job in self.jobs):
+            self.error('Another background task is active. Finish or stop it first.')
+            return
+        if selection == 'selected':
+            case = self.native_panel.selected()
+            if case is None:
+                self.error('Choose a C++ test in the table.')
+                return
+            cases = [case]
+        elif selection == 'full':
+            cases = list(self.native_cases)
+        else:
+            cases = [c for c in self.native_cases if not c.get('slow')]
+        self.cancel.clear()
+        self.native_panel.last_results = {}
+        self.native_panel.populate()
+        self.native_panel.summary.setText(f'Running {len(cases)} native C++ tests...')
+        self.test_suites.setCurrentIndex(1)
+        self.nav.setCurrentRow(2)
+        job = NativeTestJob(self.native_runner, cases, self.cancel)
+        self.jobs.append(job)
+        job.progress.connect(self.native_panel.set_result)
+        job.completed.connect(
+            lambda results, requested=selection: self.native_completed(results, requested))
+        job.finished.connect(lambda j=job: self.finished_job(j))
+        job.start()
+
+    def native_completed(self, results, selection):
+        if not results:
+            self.native_panel.report.setPlainText('No native tests completed.')
+            return
+        self.last_native_session = self.native_history.save(selection, results)
+        total = len(results)
+        passed = sum(item['status'] == 'PASS' for item in results)
+        failures = [f"{r['id']}: {r['status']} — {r['error']}"
+                    for r in results if r['status'] != 'PASS']
+        self.native_panel.summary.setText(
+            f'C++ session #{self.last_native_session}: {passed}/{total} PASS')
+        self.native_panel.report.setPlainText(
+            '\n'.join(failures[:35]) if failures else
+            f'All {total} executed C++ tests passed. Session saved to SQLite.')
+        self.refresh_history()
+
+    def set_native_baseline(self):
+        if self.last_native_session is None:
+            self.error('Run native tests before selecting a baseline.')
+            return
+        self.native_history.set_baseline(self.last_native_session)
+        self.native_panel.report.setPlainText(
+            f'Session #{self.last_native_session} set as the regression baseline.')
+
+    def compare_native_baseline(self):
+        baseline = self.native_history.baseline()
+        if baseline is None or self.last_native_session is None:
+            self.error('Select a baseline and run native C++ tests first.')
+            return
+        diff = self.native_history.compare(baseline, self.last_native_session)
+        lines = [f'Comparing baseline #{baseline} → session #{self.last_native_session}']
+        for title, key in [('New failures','introduced'),('Fixed','fixed'),
+                           ('Still failing','remaining_failures'),
+                           ('New tests','added'),('Absent tests','missing')]:
+            lines.append(f"{title}: {len(diff[key])}")
+            lines.extend('    '+item for item in diff[key][:30])
+        self.native_panel.report.setPlainText('\n'.join(lines))
+
+    def open_native_source(self, identifier):
+        case = next((c for c in self.native_cases if c['id'] == identifier), None)
+        if case is None:
+            return
+        path = ROOT / case['source']
+        if not path.is_file():
+            self.error('C++ test sources are unavailable in packaged releases.')
+            return
+        self.read_file(path)
+        target = identifier.rsplit('.',1)[-1]
+        editor = self.editor
+        location = editor.toPlainText().find(f'TEST_METHOD({target})')
+        if location >= 0:
+            cursor = editor.textCursor()
+            cursor.setPosition(location)
+            editor.setTextCursor(cursor)
+            editor.centerCursor()
 
     def update_resources(self):
         if self.process is None:
