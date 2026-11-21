@@ -3,7 +3,8 @@ import { MAX_SESSION_TABS, parseSession, snapshotSession, validSessionPath } fro
 
 describe("workspace clean-tab restoration",()=>{
   it("retains order and active document, omitting unsaved source",()=>{
-    const snapshot=snapshotSession([{path:""},{path:"a.pm",source:"secret"},{path:"lib/b.pm"},{path:"a.pm"}],"a.pm");
+    const documents=[{path:""},{path:"a.pm",source:"secret"},{path:"lib/b.pm"},{path:"a.pm"}];
+    const snapshot=snapshotSession(documents,"a.pm");
     expect(snapshot).toEqual({version:1,paths:["a.pm","lib/b.pm"],activePath:"a.pm"});
     expect(JSON.stringify(snapshot)).not.toContain("secret");
     expect(parseSession(JSON.stringify(snapshot))).toEqual(snapshot);
