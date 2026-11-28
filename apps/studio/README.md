@@ -1,91 +1,120 @@
-# PlusMinus Studio 5 — Windows/Linux x64 Stage 3 candidate (not cut over)
+# PlusMinus Studio 5
 
-Experimental Tauri 2 / Rust / React / TypeScript / Vite / Monaco / Dockview GUI.
-This is a **parallel replacement**, not a removal of the working Qt Studio 4.
+Studio 5 is the Tauri 2 / Rust desktop workbench with React, TypeScript,
+Monaco and Dockview. It runs the same C++ interpreter and portable native
+tests as Qt Studio 4. The repository's default `Start-PlusMinus` launchers
+start [Studio 4](../../ide/README.md). Stage 3 desktop acceptance targets
+Windows and Linux x64. [Acceptance and rollback](../../docs/migration/STAGE3_WINDOWS_LINUX.md).
 
-## Prerequisites
-- Node.js 22+, Rust stable, CMake and a C++20 toolchain.
-- Tauri v2 native OS prerequisites: WebView2 on Windows, WebKitGTK 4.1 on Linux, Xcode Command Line Tools on macOS.
-- A checked-out PlusMinus source tree. The C++20 core is not modified.
+## Start from a checkout
 
-## Run in development
-From repository root:
+| Platform | Launch | Preflight | Skip system tool installation |
+|---|---|---|---|
+| Windows x64 | Double-click [Start-PlusMinus-Studio5.cmd](../../Start-PlusMinus-Studio5.cmd) | `.\Start-PlusMinus-Studio5.cmd -Check` | `-NoInstall` |
+| Linux x64 | `bash ./Start-PlusMinus-Studio5.sh` or the trusted [desktop shortcut](../../Start-PlusMinus-Studio5.desktop) | `bash ./Start-PlusMinus-Studio5.sh --check` | `--no-install` |
 
-~~~sh
+Preflight reports missing prerequisites without building. A normal launch
+builds and stages `plusminus_runner` and `plusminus_native_tests`, prepares
+npm dependencies as needed, and opens the Tauri development app. The
+no-install flags skip prerequisite installation and can still run
+`npm install` for the checkout. First setup may need network access.
+
+- **Windows.** The bootstrap uses winget for missing Node.js/npm, Rustup,
+  CMake, Python, MSVC Build Tools and WebView2. It selects stable Rust for
+  `x86_64-pc-windows-msvc` and maps the installed VS 2022 or VS 2026 to its
+  CMake generator. Use a CMake version that supports that generator.
+  Rustup informational stderr is accepted when the command succeeds.
+  If Build Tools requests a restart, reboot and rerun preflight. The CMake
+  build is under `build/studio5-auto-windows`.
+- **Linux.** The launcher supports apt, dnf and pacman and can request sudo
+  for native packages, including WebKitGTK 4.1 and OpenSSL development
+  libraries. It accepts Node.js 22+ and installs a SHA-256-checked Node.js 24
+  archive in the user's home when needed, plus Rust with rustup. If using
+  an existing Node.js 22 installation, use 22.12 or newer for Vite. Use an X11
+  or Wayland session with `DISPLAY` or `WAYLAND_DISPLAY` set. The CMake build
+  is under `build/studio5-auto-linux`. When loopback port 1420 is occupied,
+  the launcher selects a free port and configures Vite and Tauri to use it.
+
+## Build manually
+
+Use Node.js 24 LTS, stable Rust with Cargo, Python 3, CMake, a C++20 toolchain
+and the platform's development prerequisites. Windows uses WebView2 and
+MSVC, Linux uses WebKitGTK 4.1 and native development libraries, and macOS
+Intel CI uses the Apple toolchain. From the repository root:
+
+```sh
 cmake -S . -B build/studio5 -DCMAKE_BUILD_TYPE=Release
-cmake --build build/studio5 --config Release
+cmake --build build/studio5 --config Release --parallel 2
 ctest --test-dir build/studio5 -C Release --output-on-failure
 node scripts/stage-native.mjs --build-dir build/studio5
 cd apps/studio
 npm install
 npm run tauri dev
-~~~
+```
 
-Stage sidecars again after rebuilding C++. For checks:
+Stage the sidecars again after rebuilding C++. The staging script copies the
+target binaries to `src-tauri/binaries/` and writes a source fingerprint.
+Direct development mode binds Vite to `127.0.0.1:1420` with a strict port
+check. Vite ignores changes under `src-tauri/` in its frontend watcher.
 
-~~~sh
-cd apps/studio
-npm run typecheck
+From `apps/studio`, after staging both sidecars:
+
+```sh
 npm run test
+npm run typecheck
+npm run lint:types
+npm run build:ui
+cargo check --all-targets --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml
 npm run tauri build
-~~~
+```
 
-## Stage 1 scope
-Choose a workspace folder with the native system dialog. The explorer lists
-.pm documents up to depth four; symlinks are skipped. Open .pm files, use
-Monaco editing, create/save with on-disk conflict detection, and run
-Run / Compile / Profile / Trace on exactly the editor source.
+The [Studio 5 workflow](../../.github/workflows/studio5.yml) builds x64
+packages on Windows, Linux and Intel macOS. The Windows MSI and Linux deb
+have package-layout and sidecar smoke scripts. Installed Studio 5 uses the
+OS webview and bundled C++ executables.
 
-The C++ runner is one-shot. stdin requires UTF-8 and EOF; stdout contains
-one JSON result, compilation errors return a nonzero exit with ok=false.
-No JSON-RPC, permanent kernel, AST service or live debugger is claimed.
-The trace is an existing bounded post-execution replay.
+## Use the workbench
 
-Frontend has no generic shell/filesystem plugin permissions. Rust enforces
-workspace path validation and restricted executable selection.
+Choose a workspace folder to browse source, C++ files, notebooks and plots.
+Explorer lists nested files up to depth four and skips symlinks.
+Use the activity rail or **Ctrl+Shift+P** to reach Test Lab, Source Tests,
+Notebook, Profiler, Resource graphs, Compiler Explorer, Git Inspector,
+Language Internals and Plot Editor. Monaco split panes can edit the same
+document. Dockview stores the layout locally and clean tabs can reopen
+after you reselect the same workspace. Unsaved source and notebook drafts
+stay in memory.
 
-## Known limitations
-- 225-test UI, SQLite history, notebooks and Language Lab are Stage 2.
-- No live CPU/RSS sampling yet. Missing metrics read "not measured".
-- Cancellation is a best-effort process kill, not a complete sandbox or
-  process-tree/job-object manager (Stage 3 hardening).
-- .pm files max 2 MiB; C++ runner source max 1 MiB; stdout max 8 MiB.
-- Workspace/session restoration and deeper file browsing are Stage 2.
-- The original Qt launcher/CI remain supported.
-- Installed package smoke testing on actual OS desktops remains a gate.
+C++ execution modes are Run, Compile, Profile and Trace. Trace replays a
+bounded instruction recording after execution. The Rust Resources panel
+shows backend CPU/RSS, and the Profiler uses C++ timings and opcode counts.
+Notebooks use a fresh process per cell. A source checkout is required to
+edit language internals, and native execution checks the build fingerprint
+when the workspace is a PlusMinus checkout.
 
-See docs/migration/ for the audited baseline, IPC rules and remaining stages.
+### Plot Editor
 
-## Stage 2 research panels (work in progress)
+Use **Open Plot** in the main toolbar, open a `.pmplot` in the workspace
+tree, or select **Ctrl+Shift+P → Open Plot Editor**. In the editor, **New**,
+**Open**, **Save** and **Save As** manage one plot document. **Ctrl+S** saves
+the active plot. **Detach** opens a separate window when available and can
+fall back to a floating panel. **Dock** returns it to the workbench.
 
-The activity rail and Ctrl+Shift+P command palette open Test Lab (native C++ tests and regression history), Source Tests (Studio 4 built-ins and copied user cases), Notebook, Profiler/Resource graphs, Compiler Explorer (bytecode CFG and heuristic call graph), Git Inspector and Language Internals. Dockview layouts are saved locally; Monaco can be split into two panels with shared document models.
+The editor restores the last opened or saved plot from disk. Changes in
+memory prompt for **Save**, **Discard** or **Cancel** when replacing the
+plot or closing the app. If the file changed externally, reopen it or
+save your changes to a different path. [Shared examples and controls](../../docs/plot-examples/README.md).
 
-The first Stage 2 launch copies the legacy SQLite database into ~/.plusminus/studio-v5.db through SQLite Backup API; it never migrates by overwriting the original. User test JSON definitions are likewise copied to ~/.plusminus/user_tests-v5.json, leaving the original untouched. Read-only Qt portable preferences can be exported with Python and PySide6 using scripts/export-studio4-settings.py; window geometry bytes cannot migrate to Dockview.
+## Local data and limits
 
-Notebooks are nbformat v4 and isolated per cell, without shared VM state. Source changes are tracked for C++ rebuilds; any failed rebuild leaves native execution stale. Use a source checkout for Language Internals; packaged binaries need not include C++ sources.
-
-**Stage 2 is not approved for final cutover yet.** Follow docs/migration/STAGE2_STATUS.md for exact pending feature-parity and desktop smoke criteria. The original Qt application remains usable.
-
-## Windows/Linux x64 Stage 3 acceptance and fallback
-
-Source/release builds use Tauri 2, Rust, React, Monaco, Dockview and the
-original unmodified native C++ sidecars; no Python or PySide6 is needed to
-run an installed Studio 5 itself. The normal `Start-PlusMinus.cmd` and
-`Start-PlusMinus.sh` continue to launch the original Qt Studio 4.
-
-Clean file tabs can reopen after explicitly choosing the same workspace;
-unsaved source bytes are not persisted. Process-tree termination is
-best-effort (Linux groups, Windows taskkill) and has not been independently
-verified under adversarial descendants. See `docs/migration/STAGE3_WINDOWS_LINUX.md`.
-
-## One-click Studio 5 setup
-
-From the repository root, double-click `Start-PlusMinus-Studio5.cmd` on Windows,
-or execute `Start-PlusMinus-Studio5.sh` / trusted `Start-PlusMinus-Studio5.desktop`
-on Linux. The launcher installs missing prerequisites, builds/stages both
-original C++ binaries, prepares frontend modules and runs `npm run tauri dev`.
-Windows uses winget. Linux supports apt, dnf and pacman, with user-approved sudo.
-Check only: `-Check` on Windows, `--check` on Linux. Disable installation:
-`-NoInstall` / `--no-install`. Qt Studio 4 launchers remain unchanged.
-This runs a development build, not a production-certified installer.
+- History uses `~/.plusminus/studio-v5.db`. On first history initialization,
+  the legacy `studio.db` is opened read-only for SQLite Backup API migration.
+  Source tests use a separate `user_tests-v5.json` copy.
+- [Qt settings exporter](../../scripts/export-studio4-settings.py) reads
+  portable QSettings values. Qt window geometry and Dockview layout have
+  different formats.
+- Source files are limited to 2 MiB and one runner request to 1 MiB of
+  UTF-8 source. Rust caps native output and manages cancellation with
+  Linux process groups and Windows `taskkill /T /F` on a best-effort basis.
+  [IPC contract](../../docs/migration/IPC_CONTRACT.md).

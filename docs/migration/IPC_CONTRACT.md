@@ -1,23 +1,26 @@
-# Studio 5 IPC contract v1 — 2026-11-21
+# Studio 5 IPC contract v1
 
-## Exact C++ one-shot protocol (unchanged)
-Spawn executable: plusminus_runner run|compile|profile|trace
-Write UTF-8 source to stdin, then CLOSE stdin to produce EOF.
-Read one complete JSON object from stdout (not JSON Lines and not JSON-RPC).
-C++ exits 0 and ok=true on success, exits 1 and ok=false on semantic
-compile/runtime errors. A normal PlusMinus compile error must not be
-converted into an IPC exception. A crash, invalid JSON, exit/ok mismatch,
-output above limit, spawn error, timeout or cancellation is a transport error.
+## C++ one-shot protocol
+Start `plusminus_runner` with one of `run`, `compile`, `profile` or `trace`.
+Write UTF-8 source to stdin, close stdin to produce EOF and read one JSON
+object from stdout. Success is exit 0 with `ok: true`. A language error
+is exit 1 with `ok: false`. Rust returns both as reports. Crashes, invalid
+JSON, inconsistent exit status, exceeded output limits, spawn errors,
+timeouts and cancellation produce transport errors.
 
-C++ JSON fields: ok:boolean, output:string, result:string,
-variables:string, bytecode:string, error:string,
-diagnostics:array, trace:array, trace_truncated:boolean, metrics:object.
-Native metrics include compile_ms, execute_ms, program_instructions,
-executed_instructions and opcode_hits. Ordinary run may report zero profiled
-instructions; do not misrepresent it as measured execution count.
-CPU/RSS and thread counts are currently NOT measured by the new backend.
-A numeric zero result is the string "0" and must be shown.
-Empty stdout must be explicitly displayed as empty, not mistaken for zero.
+The report contains `ok`, the strings `output`, `result`, `variables`,
+`bytecode` and `error`, the arrays `diagnostics` and `trace`, the boolean
+`trace_truncated`, the `metrics` object and, on current builds,
+`plot: {events, truncated, threads}`.
+PR #26 added `plot` to the native report. Rust passes it through and also
+accepts legacy reports where it is absent. [Drawing protocol](../PLOT_PROTOCOL.md).
+Native metrics include `compile_ms`, `execute_ms`, `program_instructions`,
+`executed_instructions` and `opcode_hits`. Use Profile or Trace for dynamic
+instruction counts.
+The runner includes a VM thread count in `plot.threads`. Studio 5 samples
+OS CPU and RSS for the Rust backend process.
+The string `"0"` is a numeric-zero result. Empty program output is
+represented by an empty `output` string.
 
 ## Frontend -> Rust commands
 engine_status() -> string | error
@@ -40,22 +43,18 @@ are in src-tauri/src/{process,workspace}.rs.
 - Executable selection is a fixed allowlist, resolved from trusted
   installed sidecar or development CMake paths; no user-supplied binary.
 - Workspace root is selected through native Rust dialog and canonicalized.
-- File paths are relative to workspace and limited to .pm in Stage 1.
+- Source operations take workspace-relative `.pm` paths. Notebook and
+  C++ document operations use their own extension rules. Plot commands
+  also support the native open/save dialogs.
 - Parent and actual paths are canonicalized to reject symlink escapes.
 - Files <= 2 MiB, runner source <= 1 MiB, stdout <= 8 MiB,
   stderr <= 256 KiB; timeout 100..300000 ms.
 - Jobs are keyed by random job_id; no duplicate running job IDs.
   UI ignores older completed results that do not match the active job.
-- Cancellation kills spawned child best-effort; not a complete process
-  tree sandbox. Native process is untrusted relative to user code.
+- Source and test jobs use best-effort process-tree termination on timeout
+  or cancellation. See the Stage 3 runtime contract below.
 
-## Stage 2 protocol
-Test Orchestrator will add typed channels for test progress and bounded
-concurrency; SQLite/read-only history; source rebuild operations; notebook
-file round-trip. This is a Rust/application-level extension, not a claim
-that the current C++ binary can accept JSON-RPC or live debug commands.
-
-## Stage 2 additions (Rust/Tauri, not new C++ commands)
+## Stage 2 Rust/Tauri commands
 
 - list_native_tests / start_native_suite (jobId, testIds, label, onEvent Channel): independent native C++ test worker processes, bounded concurrency two, progress and cancel_run using the common active-jobs registry.
 - history_overview / recent_runs / native_sessions / session_results / set_native_baseline / compare_native_sessions: read/write studio-v5.db. Original studio.db is opened read-only solely for SQLite Backup API migration.
@@ -114,7 +113,7 @@ no JSON-RPC, debugger or persistent notebook kernel is introduced.
 
 ## Stage 3 scope and runtime contract — Windows/Linux x64
 
-The unchanged C++ runner is still one-shot UTF-8 + EOF and single JSON
+The C++ runner uses one-shot UTF-8 + EOF and a single JSON
 response. Stage 3 uses Unix process groups and Windows taskkill /T /F as
 best-effort descendant cleanup on cancellation/timeout. No Job Object
 guarantee or adversarial orphan regression has been established.
@@ -123,3 +122,27 @@ In the frontend, validated workspace-relative paths and the active filename
 are stored locally for clean-tab restoration after user explicitly reselects
 that workspace. Unsaved source is deliberately NOT stored. New atomic file
 write serialization is process-local, not a cross-process lock.
+
+
+## Plot documents (Studio 4 file format v1)
+
+- `open_plot({relative?})` opens a workspace-relative `.pmplot` or presents
+  the native picker when `relative` is omitted. It returns `{path,source,digest}`
+  or null on cancellation.
+- `save_plot({source,path?,expected?,name?})` accepts an authorized plot path
+  and its SHA-256 digest, or presents the native save dialog for a new
+  destination. It returns the updated file record or null on cancellation.
+  Rust validates the document and stages writes next to the destination before
+  replacing it.
+- `remember_plot({path?})` stores the authorized last plot path or clears it.
+  `restore_plot()` reopens the recorded file if it still exists. Drafts and
+  preview data stay in memory.
+
+`open_plot` and `restore_plot` authorize successfully read canonical
+paths for later saves. `save_plot` checks the expected digest inside the
+process-local write lock. `remember_plot` writes `last-plot.json` under
+Tauri's app config directory. Passing null clears the saved path.
+
+The file size limit is 2 MiB, with at most 16 series and 10,000 total data points.
+Formula previews run in a Web Worker. The [plot document format](../PLOT_EDITOR_PLAN.md)
+is independent of the native runner's drawing events.

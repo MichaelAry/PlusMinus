@@ -1,5 +1,10 @@
 # PlusMinus Studio 5 — three-stage migration plan
 
+Historical plan for the original Qt/C++ baseline. Its change restrictions
+describe the migration PRs at that baseline. PR #26 later added Math,
+native drawing and the Qt Plot Editor. See the [current launch guide](../../apps/studio/README.md)
+and [Stage 3 status](STAGE3_WINDOWS_LINUX.md) for the supported scope.
+
 **Audited baseline:** master 41360ed7f470dd76da264b24ff74171ef55da5c2,
 21 November 2026. Stage 1 branch: feature/studio5-foundation.
 

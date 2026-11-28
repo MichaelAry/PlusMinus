@@ -1,5 +1,9 @@
 # PlusMinus Studio 5 — Stage 2 evidence ledger
 
+Historical snapshot of Stage 2. For later parity changes, x64 bootstrap
+support and remaining desktop checks, see the [parity ledger](FEATURE_PARITY.md)
+and [Stage 3 status](STAGE3_WINDOWS_LINUX.md).
+
 **Stage 2 merged:** [PR #20](https://github.com/MichaelAry/PlusMinus/pull/20) at master 5ebab283.
 **Pre-cutover hardening:** [PR #21](https://github.com/MichaelAry/PlusMinus/pull/21) (CI verification pending).
 **Source baseline:** stage-1 merged commit `c395dfe8` on `master`.

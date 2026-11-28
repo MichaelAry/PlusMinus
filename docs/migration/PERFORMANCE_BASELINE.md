@@ -1,8 +1,8 @@
 # Performance baseline — NOT MEASURED
 
-Source baseline: master 41360ed7f470dd76da264b24ff74171ef55da5c2.
-The authoring environment had no Rust toolchain and could not resolve npm
-dependencies, so no desktop benchmark numbers can be claimed from it.
+Initial Qt baseline: master `41360ed7f470dd76da264b24ff74171ef55da5c2`.
+For current comparisons, record the exact commits and stage matching
+C++ binaries from the same checkout for both apps.
 
 | Metric | Qt Studio 4 | Tauri Stage 1 | Acceptance guidance |
 |---|---|---|---|
@@ -11,7 +11,7 @@ dependencies, so no desktop benchmark numbers can be claimed from it.
 | Editor key to paint p95 | NOT MEASURED | NOT MEASURED | Target <=50ms |
 | 20 opened documents | NOT MEASURED | NOT MEASURED | No visible freeze |
 | C++ execution wall time | NOT MEASURED | NOT MEASURED | Compare identical binary |
-| 225 native tests | Qt available | Stage 2 | Functional parity |
+| 225 native tests | NOT MEASURED | NOT MEASURED | Compare complete isolated suites |
 | Trace replay 5000 events | Qt available | NOT MEASURED | Interactive scrolling |
 | Process CPU / peak RSS | Sampled by old Python | NOT MEASURED | Stage 2 |
 
@@ -24,7 +24,7 @@ Measurement protocol for Stage 3:
    trace events, source search, dock resize and UI startup.
 5. Run installed Tauri packages as well as development builds and test
    original Qt GUI with real windowing, not solely offscreen CI.
-6. Verify Windows x64, Linux X11/Wayland, macOS Intel and ARM64.
+6. Verify Windows x64 and Linux x64 under X11 and Wayland for Stage 3.
 7. Archive raw measurements and scripts; never infer measured success
    from presence of source code or CI configuration.
 
@@ -55,7 +55,7 @@ PR #21 adds scripts/smoke-packaged-linux.sh to inspect the actual packaged .deb 
 Run `npm run lint:types && npm run test && npm run typecheck` under
 `apps/studio/`; run `cargo check --all-targets && cargo test &&
 cargo clippy --all-targets` under `apps/studio/src-tauri/` after staging
-the unchanged C++ sidecars. On each platform, also execute
+current C++ sidecars. On each platform, also execute
 `node scripts/verify-native-isolation.mjs --build-dir build/studio5`
 and the original CTest suite. These are *correctness* checks, not comparative
 performance measurements. No new CPU/RSS, startup, editor-latency or Qt/Tauri
@@ -95,3 +95,13 @@ Commands for repeatable correctness inputs: `cmake -S . -B build/studio5 -DCMAKE
 Install Qt and Studio 5 candidates on the same workstation, run the GUI actions
 above, archive raw traces. Never label code-splitting or memoization as a
 measured win without collected before/after traces.
+
+## Plot Editor responsiveness
+
+Use the [same .pmplot files](../plot-examples/README.md) on both desktops.
+Record formula edit-to-preview, slider drag, pan/zoom, Fit and detach/dock
+latencies. Add a fixture with 16 series and up to 10,000 total points for
+load and interaction tests. The optional Qt probe
+`QT_QPA_PLATFORM=offscreen .venv/bin/python tools/smoke_qt.py --plot-benchmark`
+reports local edit-to-paint timings. A same-hardware desktop comparison
+and memory measurements for Studio 5 remain pending.

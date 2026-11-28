@@ -1,25 +1,26 @@
-# Studio 5 — independent Stage 1/2 feature parity ledger
+# Studio 5 — feature parity ledger
 
 **Baseline:** original Qt/C++ revision `41360ed7f470dd76da264b24ff74171ef55da5c2`.
 **Migration base:** `master` at `5ebab2836f6ba914373abfa23c8d17c007d14af8`.
-**Merged fixes:** PR #22 into `master` at `a33ad24582f11594ada2118e0a5764d33d53f44d`. Stage 3 PR #23 targets Windows x64 and Linux x64 only; evidence below remains conservative.
+**Merged milestones:** PR #22 at `a33ad245` and Stage 3 PR #23 at
+`97b5d2c`. Stage 3 desktop acceptance covers Windows x64 and Linux x64.
 **Status definitions:** DONE = independently confirmed by meaningful tests or immutable Git comparison; PARTIAL = implemented but incomplete or GUI confirmation unavailable; MISSING = not implemented; BLOCKED = impossible under the unchanged runner contract. A successful compile alone never proves desktop feature parity.
 
 ## Stage 1 — Foundation
 
 | Function | Status | Code/evidence | Missing proof or correction |
 |---|---|---|---|
-| Unchanged C++20 interpreter, portable tests and CMake | DONE | Git compare against master; protected paths untouched | Keep immutable until cutover |
-| Qt Studio 4 and launch.py available | DONE | Original files and existing Desktop Qt workflow unchanged | Never default to Tauri in Stage 2 |
+| Shared C++20 interpreter, portable tests and CMake | DONE | Both editions build the same core. PR #26 extended it with Math and drawing. | Compare matching native builds in installed GUI checks |
+| Qt Studio 4 and launch.py available | DONE | Default Qt launcher and independent desktop workflow | Validate rollback on each Stage 3 OS |
 | Tauri 2 / Rust Tokio / React / TypeScript / Vite | PARTIAL | `apps/studio/package.json`, `src-tauri/Cargo.toml`; PR #21 passed 3-OS build | PR #22 check and real desktop interactions |
 | Monaco editor and Dockview panels | PARTIAL | `src/App.tsx`, `src/features/editor/EditorPane.tsx` | Split-view, layout/focus E2E smoke |
 | Workspace tree and .pm read/create/save | PARTIAL | `src-tauri/src/workspace.rs` round-trip tests | Installed GUI interaction and symlink-race tests |
-| Run/Compile/Profile/Trace via unchanged runner | PARTIAL | `src-tauri/src/process.rs`; staged C++ tests and `smoke-native.mjs` | Execute from installed GUI on each OS |
+| Run/Compile/Profile/Trace via C++ runner | PARTIAL | `src-tauri/src/process.rs`, native smoke and `plot` pass-through | Execute from installed GUI on each Stage 3 OS |
 | UTF-8 stdin / mandatory EOF | PARTIAL | `process.rs`: async write_all and drop(stdin), actual C++ smoke | Installed sidecar invocation |
 | Single JSON object, exact exit codes, nested protocol validation | PARTIAL | `process.rs` decode_report tests incl. invalid diagnostics/trace/metrics | PR #22 CI on actual binaries |
 | Empty stdout, result \"0\", compile/runtime errors | PARTIAL | `present.ts`, `process.rs` tests, original native smoke | GUI display of all cases |
 | stderr, output bounds and history errors | PARTIAL | `process.rs`, `lib.rs`, `OutputPane.tsx` | IPC + UI negative-path testing |
-| Timeouts/cancellation and descendants | PARTIAL | Stage 3 `process_tree.rs`: Unix process group kill, Windows best-effort taskkill /T /F | Windows Job Object/orphan regression NOT VERIFIED |
+| Timeouts/cancellation and descendants | PARTIAL | Unix process groups with a Linux grandchild regression, Windows best-effort `taskkill /T /F` | Windows descendant handling needs desktop verification |
 | Secure workspace-relative paths and optimistic saves | PARTIAL | `workspace.rs` and `extra_files.rs` tests | TOCTOU/symlink attacks and concurrent writers |
 | Windows/Linux/macOS x64 packaging of both sidecars | PARTIAL | `studio5.yml`, `stage-native.mjs`; inherited CI passed | PR #22 CI, installed launch and IPC, ARM64 |
 | Typed TS/Rust invoke declarations | PARTIAL | `src/api/contracts.ts`, `src-tauri/src/{lib,process}.rs` | Generated contract parity/round-trip E2E |
@@ -55,14 +56,17 @@
 | Command palette | PARTIAL | `App.tsx` | Qt command coverage and keyboard interaction |
 | Language Internals / rebuild C++ | PARTIAL | `language.rs`, `LanguagePanel.tsx`; build fingerprint manifests | External edits, rebuild errors, installed sidecar switching |
 | Stale-response prevention and safe workspace switching | PARTIAL | `App.tsx`, `NotebookPanel.tsx`, source-snapshot identity | Race-focused GUI stress |
-| Cross-platform installed GUI interactions | MISSING | Only Linux installed-layout startup smoke without interactions | Windows/macOS/Linux GUI workflow test suite |
+| Cross-platform installed GUI interactions | MISSING | Linux extracted-package startup smoke and Windows MSI sidecar smoke | Installed desktop workflows on Windows and Linux x64 |
 | Live debugger / breakpoints / VM stepping | BLOCKED | Unmodified C++ runner is one-shot JSON, no DAP/debug control API | Requires separately authorized native engine changes |
 | Shared persistent Jupyter kernel state | BLOCKED | Each notebook cell spawns a fresh C++ VM | Requires a new runner session API |
 | Structured native compiler AST | BLOCKED | Only bytecode listing and source heuristics exposed | Requires additional C++ compiler API |
 
 ## Validation and merge gate
 
-**Prior validated ancestry:** PR #21 `cc2e084` CI passed C++ checks, 225 separately launched test cases, frontend/Rust tests and x64 packages. New code in PR #22 must be validated again; canceled and pending jobs count as NOT RUN, not PASS. See the current `studio5.yml` workflow results on PR #22.
+**Prior validated ancestry:** PR #21 `cc2e084` CI passed C++ checks, 225
+separately launched test cases, frontend/Rust tests and x64 packages.
+Recheck the candidate under review using the [Studio 5 workflow](../../.github/workflows/studio5.yml)
+and [cutover checklist](PRE_CUTOVER_VERIFICATION.md).
 
 Commands in repository root and app directories:
 
@@ -77,4 +81,12 @@ python scripts/check-qt-native-parity.py --build-dir build/studio5
 (cd apps/studio/src-tauri && cargo check --all-targets && cargo test && cargo clippy --all-targets)
 ```
 
-Stage 3 remains **NOT READY** until critical functional gaps and actual installed-GUI checks pass. Never infer RUNNER/VM feature availability from a button, a description, or a successful package build.
+## Changes after the original parity audit
+
+| Capability | Status | Evidence and open checks |
+|---|---|---|
+| Windows/Linux source bootstrap | PARTIAL | Separate launchers, check-only and rustup stderr regressions, Linux development port fallback. First-run GUI setup needs platform validation. [Launch guide](../../apps/studio/README.md) |
+| Math and program drawing | DONE for the native runner | PR #26 and `drawer_smoke`. Studio 5 IPC preserves native `plot` data. [Protocol](../PLOT_PROTOCOL.md) |
+| Formula and point-table Plot Editor | PARTIAL | Qt and Tauri use the same `.pmplot` v1 fixtures. Qt smoke and Tauri model/file tests cover the format. Installed Tauri window interaction and round-trips need validation. [Plot Editor](../PLOT_EDITOR_PLAN.md) |
+
+Studio 4 remains the default pending installed desktop acceptance.
