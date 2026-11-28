@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "profile": "FULL",
+  "source": "selected",
+  "reason": "discovery: long-term",
+  "discovery": {
+    "schema": 1,
+    "facts": {
+      "purpose": {
+        "state": "confirmed",
+        "value": "Учебный интерпретатор и настольная среда PlusMinus Studio с долгосрочным развитием в продукт",
+        "basis": "Подтверждено пользователем и сверено с README и исходниками"
+      },
+      "lifetime": {
+        "state": "confirmed",
+        "value": "long-term",
+        "basis": "Пользователь указал долгосрочное развитие"
+      },
+      "scale": {
+        "state": "inferred",
+        "value": "product",
+        "basis": "Интерпретатор и два настольных клиента; продуктовый горизонт"
+      },
+      "planning": {
+        "state": "confirmed",
+        "value": "three-horizon",
+        "basis": "Пользователь подтвердил конфигурацию"
+      },
+      "documentation": {
+        "state": "delegated",
+        "value": "standard",
+        "basis": "Минимально достаточное сопровождение, существующие документы остаются источниками истины"
+      },
+      "autonomy": {
+        "state": "confirmed",
+        "value": "bounded",
+        "basis": "Отдельное согласование архитектуры, совместимости и зависимостей"
+      },
+      "collaboration": {
+        "state": "confirmed",
+        "value": "solo",
+        "basis": "Подтверждена последовательная работа агентов"
+      },
+      "constraints": {
+        "state": "confirmed",
+        "value": "Для настройки разрешены документация, аудит и проверки; изменения кода, тестов и выполнение backlog требуют отдельного поручения.",
+        "basis": "Ограничения задания"
+      },
+      "success": {
+        "state": "inferred",
+        "value": "Ближайший ориентир — приёмка Studio 5 на Windows и Linux x64 по действующему чек-листу; Studio 4 остаётся запуском по умолчанию до прохождения приёмки.",
+        "basis": "Существующий чек-лист и ранее предложенная конфигурация"
+      }
+    },
+    "updated_at": "2026-11-28T09:56:44Z"
+  },
+  "planning_enabled": true
+}
