@@ -54,7 +54,8 @@ pub fn list(root: &Path) -> Result<Vec<Entry>, String> {
             let kind = item.file_type().map_err(|e| e.to_string())?;
             if kind.is_symlink() { continue; }
             let is_dir = kind.is_dir();
-            if !is_dir && (!kind.is_file() || !matches!(item.path().extension().and_then(|s| s.to_str()),Some("pm"|"ipynb"|"cpp"|"hpp"|"h"))) { continue; }
+            if !is_dir && (!kind.is_file() || !item.path().extension().and_then(|s| s.to_str()).is_some_and(|ext|
+                matches!(ext, "pm" | "ipynb" | "cpp" | "hpp" | "h") || ext.eq_ignore_ascii_case("pmplot"))) { continue; }
             let entry_path = item.path();
             let relative = entry_path.strip_prefix(root).map_err(|e| e.to_string())?;
             entries.push(Entry {

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "title": "PlusMinus Studio 5 / Graphite Research",
         "width": 1480,
         "height": 920,

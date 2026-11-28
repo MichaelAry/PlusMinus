@@ -1,5 +1,10 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState, type LazyExoticComponent, type ReactElement } from "react";
 import { DockviewReact, themeDark, type DockviewReadyEvent } from "dockview-react";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { confirmPlotExit, openPlot, restorePlot, savePlot, usePlot } from "./features/plot/store";
+import { PlotConfirmation } from "./features/plot/PlotConfirmation";
+import "./features/plot/plot.css";
 import { native } from "./api/native";
 import { parity } from "./api/parity";
 import type { RunMode, TreeEntry } from "./api/contracts";
@@ -19,16 +24,17 @@ const GraphLazy=lazy(()=>import("./features/parity/GraphPanel").then(m=>({defaul
 const NotebookLazy=lazy(()=>import("./features/parity/NotebookPanel").then(m=>({default:m.NotebookPanel})));
 const LanguageLazy=lazy(()=>import("./features/parity/LanguagePanel").then(m=>({default:m.LanguagePanel})));
 const GitLazy=lazy(()=>import("./features/parity/GitPanel").then(m=>({default:m.GitPanel})));
-const deferred=(Component:LazyExoticComponent<()=>ReactElement>)=>
-  function DeferredPanel(){
+const PlotLazy=lazy(()=>import("./features/plot/PlotPanel").then(m=>({default:m.PlotPanel})));
+const deferred=<Props extends object>(Component:LazyExoticComponent<(props:Props)=>ReactElement>)=>
+  function DeferredPanel(props:Props){
     return <Suspense fallback={<div className="empty-state" role="status">Loading panel…</div>}>
-      <Component/>
+      <Component {...props}/>
     </Suspense>;
   };
 const HistoryPanel=deferred(HistoryLazy),ProfilerPanel=deferred(ProfilerLazy);
 const ResourcePanel=deferred(ResourcesLazy),GraphPanel=deferred(GraphLazy);
 const NotebookPanel=deferred(NotebookLazy),LanguagePanel=deferred(LanguageLazy);
-const GitPanel=deferred(GitLazy);
+const GitPanel=deferred(GitLazy),PlotPanel=deferred(PlotLazy);
 import "./features/parity/ParityStyle.css";
 
 const MemoDockview=memo(({onReady}:{onReady:(event:DockviewReadyEvent)=>void})=>
@@ -36,14 +42,14 @@ const MemoDockview=memo(({onReady}:{onReady:(event:DockviewReadyEvent)=>void})=>
 const panels = {
   editor: EditorPane, results: OutputPane, tests: TestLab, sourcetests: SourceTestsPanel, history: HistoryPanel,
   profiler: ProfilerPanel, resources: ResourcePanel, graphs: GraphPanel, notebook: NotebookPanel,
-  language: LanguagePanel, git: GitPanel,
+  language: LanguagePanel, git: GitPanel, plot: PlotPanel,
 };
 type PanelName = keyof typeof panels;
 const modes: RunMode[] = ["run","compile","profile","trace"];
 const panelTitles:Record<PanelName,string> = {
   editor:"Editor",results:"Results",tests:"Native Test Lab",sourcetests:"Source Tests",history:"History",
   profiler:"Profiler",resources:"Resources",graphs:"Compiler Explorer",notebook:"Notebooks",
-  language:"Language Internals",git:"Git Inspector",
+  language:"Language Internals",git:"Git Inspector",plot:"Plot Editor",
 };
 const paletteCommands:{label:string;id:PanelName}[] = [
   {label:"Show code editor",id:"editor"},{label:"Open Native Test Lab",id:"tests"},
@@ -51,6 +57,7 @@ const paletteCommands:{label:string;id:PanelName}[] = [
   {label:"Open performance profiler",id:"profiler"},
   {label:"Open measured resource graphs",id:"resources"},
   {label:"Open compiler graphs",id:"graphs"},
+  {label:"Open Plot Editor",id:"plot"},
   {label:"Open isolated notebooks",id:"notebook"},
   {label:"Browse C++ language implementation",id:"language"},
   {label:"Open Git inspector",id:"git"},
@@ -76,6 +83,10 @@ export default function App() {
   const [search,setSearch]=useState("");
 
   useEffect(()=>{
+    if(isTauri())void restorePlot().then(()=>{
+      const message=usePlot.getState().message;
+      if(message)setMessage("Plot session: "+message);
+    });
     void native.engineStatus().then(setEngine).catch(e=>setEngine("Runner unavailable: "+String(e)));
   },[]);
   const refresh=useCallback(async()=>{
@@ -129,15 +140,31 @@ export default function App() {
     const api=dockApi.current;if(!api)return;
     const id=name==="editor"?"source-editor":name==="results"?"run-results":"tool-"+name;
     const old=api.getPanel(id);
-    if(old){old.api.setActive();return;}
+    if(old){
+      old.api.setActive();
+      if(old.api.location.type==="popout") old.api.getWindow().focus();
+      if(name==="plot") old.api.getWindow().requestAnimationFrame(()=>{
+        old.api.getWindow().document.querySelector<HTMLElement>("[data-plot-editor-focus]")?.focus();
+      });
+      return;
+    }
     const reference=api.getPanel("source-editor");
     api.addPanel({id,component:name,title:panelTitles[name],
-      position:reference?{referencePanel:reference,direction:name==="tests"?"right":"below"}:undefined});
+      position:reference?{referencePanel:reference,direction:name==="tests"||name==="plot"?"right":"below"}:undefined});
   },[]);
+  const openPlotFile=useCallback(async(path:string|null=null)=>{
+    showPanel("plot");
+    const panel=dockApi.current?.getPanel("tool-plot");
+    await openPlot(panel?.api.getWindow().document??document,path);
+  },[showPanel]);
   const openFile=useCallback(async(path:string,anchor?:string)=>{
     const generation=workspaceGeneration.current;
     const focusId=++focusGeneration.current;
     const root=useStudio.getState().workspace;
+    if(/\.pmplot$/i.test(path)){
+      await openPlotFile(path);
+      return;
+    }
     if(path.endsWith(".ipynb")){
       sessionStorage.setItem("studio5:open-notebook",path);
       showPanel("notebook");
@@ -159,13 +186,16 @@ export default function App() {
     if(anchor)requestAnimationFrame(()=>setTimeout(()=>{
       window.dispatchEvent(new CustomEvent("studio:goto-anchor",{detail:{path,anchor}}));
     },50));
-  },[open,showPanel]);
+  },[open,openPlotFile,showPanel]);
   useEffect(()=>{
     if(!workspace || restoringSession.current)return;
     saveSession(workspace,docs,activeId);
   },[workspace,docs,activeId]);
 
   const saveFile=useCallback(async()=>{
+    if(dockApi.current?.activePanel?.id==="tool-plot"){
+      await savePlot();return;
+    }
     if(dockApi.current?.activePanel?.id==="tool-notebook"){
       window.dispatchEvent(new Event("studio:save-notebook"));return;
     }
@@ -227,9 +257,29 @@ export default function App() {
     };
   },[openFile,refresh]);
   useEffect(()=>{
-    const guard=(e:BeforeUnloadEvent)=>{
-      if(hasUnsavedNotebookDrafts()||useStudio.getState().documents.some(d=>d.dirty)){
-        e.preventDefault();e.returnValue="";
+    const otherDirty=()=>hasUnsavedNotebookDrafts()||useStudio.getState().documents.some(d=>d.dirty);
+    if(isTauri()){
+      let disposed=false;
+      let closing=false;
+      const unlisten=getCurrentWindow().onCloseRequested(async event=>{
+        event.preventDefault();
+        if(closing||usePlot.getState().busy)return;
+        closing=true;
+        try{
+          if(otherDirty()&&!window.confirm("Quit and discard unsaved source documents/notebooks?"))return;
+          if(!await confirmPlotExit())return;
+          const plot=dockApi.current?.getPanel("tool-plot");
+          if(plot?.api.location.type==="popout") plot.api.getWindow().close();
+          await getCurrentWindow().destroy();
+        }catch(error){setMessage("Close failed: "+String(error));}
+        finally{closing=false;}
+      });
+      void unlisten.then(cleanup=>{if(disposed)cleanup();}).catch(error=>setMessage("Close handler: "+String(error)));
+      return()=>{disposed=true;void unlisten.then(cleanup=>cleanup(),()=>{});};
+    }
+    const guard=(event:BeforeUnloadEvent)=>{
+      if(otherDirty()||usePlot.getState().dirty||usePlot.getState().busy){
+        event.preventDefault();event.returnValue="";
       }
     };
     window.addEventListener("beforeunload",guard);
@@ -257,6 +307,20 @@ export default function App() {
   },[palette,chooseWorkspace,execute,saveFile,stop]);
   const onDockReady=useCallback((event:DockviewReadyEvent)=>{
     dockApi.current=event.api;
+    event.api.onDidAddPopoutGroup(({group,window:popup})=>{
+      function onKey(key:KeyboardEvent){
+        if(group.activePanel?.id!=="tool-plot" ||
+          !(key.ctrlKey||key.metaKey) || key.key.toLowerCase()!=="s")return;
+        key.preventDefault();
+        key.stopPropagation();
+        void savePlot();
+      }
+      popup.addEventListener("keydown",onKey,true);
+      popup.addEventListener("pagehide",()=>popup.removeEventListener("keydown",onKey,true),{once:true});
+      if(group.activePanel?.id==="tool-plot")popup.requestAnimationFrame(()=>{
+        popup.document.querySelector<HTMLElement>("[data-plot-editor-focus]")?.focus();
+      });
+    });
     let restored=false;
     const saved=localStorage.getItem("studio5:dockview:layout");
     if(saved)try{event.api.fromJSON(JSON.parse(saved));restored=true;}catch{localStorage.removeItem("studio5:dockview:layout");}
@@ -281,6 +345,7 @@ export default function App() {
       <div className="top-actions">
         <button onClick={()=>void chooseWorkspace()}>Workspace <kbd>Ctrl+O</kbd></button>
         <button disabled={!workspace} onClick={()=>void newFile()}>New</button>
+        <button onClick={()=>void openPlotFile()}>Open Plot</button>
         <button disabled={busy} onClick={()=>void saveFile()}>Save <kbd>Ctrl+S</kbd></button>
         <button onClick={split}>Split</button>
         <button onClick={()=>{setPalette(true);setSearch("");}}>Commands</button>
@@ -294,9 +359,9 @@ export default function App() {
     </header>
     <div className="main-area">
       <aside className="activity-rail" aria-label="Workspace navigation">
-        {(["editor","tests","sourcetests","notebook","profiler","resources","graphs","history","language","git"] as PanelName[]).map((n,i)=>
+        {(["editor","tests","sourcetests","notebook","profiler","resources","graphs","history","language","git","plot"] as PanelName[]).map((n,i)=>
           <button key={n} title={panelTitles[n]} aria-label={panelTitles[n]} onClick={()=>showPanel(n)}>
-            {["⌘","✓","≡","▤","◫","▥","⌁","◷","✥","⑂"][i]}</button>)}
+            {["⌘","✓","≡","▤","◫","▥","⌁","◷","✥","⑂","∿"][i]}</button>)}
       </aside>
       <aside className="explorer">
         <div className="pane-label"><span>EXPLORER</span><button onClick={()=>void refresh()} disabled={!workspace}>↻</button></div>
@@ -307,7 +372,7 @@ export default function App() {
           <button key={entry.path} className={"file-item "+(entry.directory?"directory":"")+
             (active?.path===entry.path?" current":"")}
             style={{paddingLeft:14+entry.depth*14}} disabled={entry.directory} onClick={()=>void openFile(entry.path)}>
-            <span className="file-marker">{entry.directory?"▸":entry.path.endsWith(".ipynb")?"▤":"±"}</span>
+            <span className="file-marker">{entry.directory?"▸":entry.path.endsWith(".ipynb")?"▤":/\.pmplot$/i.test(entry.path)?"∿":"±"}</span>
             <span>{entry.name}</span>
           </button>):<span className="explorer-empty">No source files found.</span>}</div>}
         <div className="explorer-footnote">C++20 · isolated process · Studio 5 parity</div>
@@ -325,6 +390,7 @@ export default function App() {
       <span className="status-separator">│</span><span>UTF-8</span>
       <span className="status-separator">│</span><span>RUST / C++20</span>
     </footer>
+    <PlotConfirmation/>
     {palette&&<div className="command-overlay" role="presentation" onMouseDown={()=>setPalette(false)}>
       <section className="command-dialog" role="dialog" aria-modal="true" aria-label="Command palette"
         onMouseDown={e=>e.stopPropagation()}>

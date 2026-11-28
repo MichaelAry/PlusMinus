@@ -9,10 +9,11 @@ mod language;
 mod user_tests;
 mod resources;
 mod tasks;
+mod plot_files;
 
 use std::{path::PathBuf, sync::{Mutex,atomic::{AtomicBool,Ordering}}};
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, webview::NewWindowResponse};
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Default)]
@@ -23,6 +24,7 @@ pub(crate) struct StudioState {
     pub(crate) built_source_hash: Mutex<Option<String>>,
     pub(crate) rebuilt_native: Mutex<Option<PathBuf>>,
     resources: Mutex<resources::Sampler>,
+    plots: plot_files::PlotFiles,
 }
 
 /// Reject binaries whose C++ inputs differ from the hash captured when they
@@ -309,6 +311,33 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(StudioState::default())
+        .setup(|app| {
+            let config = app.config().app.windows.first().ok_or("Missing main window configuration")?;
+            let handle = app.handle().clone();
+            WebviewWindowBuilder::from_config(app, config)?
+                .on_new_window(move |url, features| {
+                    let Some(main) = handle.get_webview_window("main") else {
+                        return NewWindowResponse::Deny;
+                    };
+                    let Ok(origin) = main.url() else { return NewWindowResponse::Deny; };
+                    if url.scheme() != origin.scheme() || url.host_str() != origin.host_str()
+                        || url.port() != origin.port() || url.path() != "/popout.html"
+                    {
+                        return NewWindowResponse::Deny;
+                    }
+                    let builder = WebviewWindowBuilder::new(&handle, "dock-popout",
+                        WebviewUrl::App("popout.html".into()))
+                        .window_features(features)
+                        .title("PlusMinus Studio 5 — Plot Editor")
+                        .inner_size(1050.0, 640.0);
+                    match builder.build() {
+                        Ok(window) => NewWindowResponse::Create { window },
+                        Err(_) => NewWindowResponse::Deny,
+                    }
+                })
+                .build()?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             run_source, cancel_run, choose_workspace, list_workspace,
             open_source, save_source, create_source, engine_status,
@@ -319,7 +348,8 @@ pub fn run() {
             open_workspace_document, save_workspace_document, create_notebook,
             git_summary, language_targets, rebuild_native, native_source_stale,
             list_user_tests, save_user_tests, import_user_tests, export_user_tests,
-            resource_snapshot, task_snapshot, list_tasks, export_history
+            resource_snapshot, task_snapshot, list_tasks, export_history,
+            plot_files::open_plot, plot_files::save_plot, plot_files::remember_plot, plot_files::restore_plot
         ])
         .run(tauri::generate_context!())
         .expect("Failed to start PlusMinus Studio 5");
