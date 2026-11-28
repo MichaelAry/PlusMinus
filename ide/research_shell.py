@@ -8,7 +8,7 @@ import sys
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QDockWidget, QFileSystemModel, QFrame, QHBoxLayout, QLabel, QListWidget,
+    QApplication, QDockWidget, QFileSystemModel, QFrame, QHBoxLayout, QLabel, QListWidget,
     QMenu, QPushButton, QTabWidget, QToolButton, QTreeView, QVBoxLayout, QWidget,
 )
 from command_palette import CommandPalette
@@ -87,6 +87,7 @@ class ResearchController:
         if row is None:
             return
         self.active_mode = mode
+        self.host.leave_plot_document()
         self.host.nav.setCurrentRow(row)
         for name, button in self.controls.items():
             button.setChecked(name == mode)
@@ -122,7 +123,9 @@ class ResearchController:
         path = Path(self.explorer_tree.model().filePath(index))
         if not path.is_file():
             return
-        if path.suffix.lower() == ".ipynb":
+        if path.suffix.lower() == ".pmplot":
+            self.host.plot_editor.open_document(path)
+        elif path.suffix.lower() == ".ipynb":
             self.activate("Notebooks")
             self.host.notebooks.open_file(path)
         elif path.suffix.lower() in (".pm", ".cpp", ".h", ".hpp", ".py", ".txt", ".md"):
@@ -136,7 +139,7 @@ class ResearchController:
     def palette(self):
         host = self.host
         commands = [
-            ("File: Open source / notebook", host.open_file),
+            ("File: Open source / notebook / plot", host.open_file),
             ("File: New PlusMinus source", host.new_file),
             ("File: Save active document", host.save_active),
             ("Notebook: New document", lambda: (self.activate("Notebooks"), host.notebooks.new_file())),
@@ -157,6 +160,7 @@ class ResearchController:
             ("Workspace: Performance", lambda: self.activate("Performance")),
             ("Workspace: Source Control", lambda: self.activate("Source Control")),
             ("Explorer: Focus project tree", self.focus_project),
+            ("View: Plot Editor", host.show_plot_editor),
             ("Panels: Toggle inspector", lambda: self.inspector.setVisible(not self.inspector.isVisible())),
             ("Panels: Toggle output", lambda: self.console.setVisible(not self.console.isVisible())),
             ("Workspace: Restore default layout", self.reset_layout),
@@ -355,6 +359,17 @@ def build_research_shell(host, root):
     console_dock = _dock(host, "Output and Diagnostics", host.result_tabs,
                          Qt.DockWidgetArea.BottomDockWidgetArea)
 
+    from plot_editor import PlotEditor
+    host.plot_editor = PlotEditor(host)
+    host.plot_dock = _dock(host, "Plot Editor", host.plot_editor,
+                           Qt.DockWidgetArea.RightDockWidgetArea)
+    host.plot_dock.hide()
+    host.plot_is_active = False
+
+    QApplication.instance().focusChanged.connect(host.track_plot_focus)
+    host.workspace.pageActivated.connect(host.leave_plot_document)
+    host.menuBar().addMenu("View").addAction(host.plot_dock.toggleViewAction())
+
     controller = ResearchController(host, explorer_dock, inspector_dock,
                                      console_dock, controls, explorer_tree)
     host.research_controller = controller
@@ -382,6 +397,8 @@ def build_research_shell(host, root):
         action.setShortcut(keys)
         action.triggered.connect(callback)
         host.addAction(action)
+        if keys == "Ctrl+S":
+            host.plot_dock.addAction(action)
     host.nav.setCurrentRow(0)
     controls["Develop"].setChecked(True)
     host.resizeDocks([explorer_dock, inspector_dock],

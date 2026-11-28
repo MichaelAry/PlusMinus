@@ -1215,16 +1215,37 @@ class Studio(QMainWindow):
         return self.documents.maybe_save(self.documents.current_document())
 
     def new_file(self):
+        self.leave_plot_document()
         self.documents.new_document('')
         self.nav.setCurrentRow(1)
 
+    def track_plot_focus(self, old, current):
+        if current is None:
+            return
+        if current is self.plot_dock or self.plot_dock.isAncestorOf(current):
+            self.plot_is_active = True
+        elif current is self.workspace or self.workspace.isAncestorOf(current):
+            self.plot_is_active = False
+
+    def leave_plot_document(self, *_):
+        self.plot_is_active = False
+
+    def show_plot_editor(self):
+        self.plot_is_active = True
+        self.plot_dock.show()
+        self.plot_dock.raise_()
+        self.plot_dock.activateWindow()
+        self.plot_editor.focus_editor()
+
     def open_file(self):
         filename, _ = QFileDialog.getOpenFileName(
-            self, 'Open source or notebook', str(ROOT),
-            'PlusMinus, C++ and notebooks (*.pm *.cpp *.h *.hpp *.ipynb);;All files (*)')
+            self, 'Open source, notebook or plot', str(ROOT),
+            'Studio files (*.pm *.cpp *.h *.hpp *.ipynb *.pmplot);;All files (*)')
         if filename:
             path = Path(filename)
-            if path.suffix.lower() == '.ipynb':
+            if path.suffix.lower() == '.pmplot':
+                self.plot_editor.open_document(path)
+            elif path.suffix.lower() == '.ipynb':
                 self.research_controller.activate('Notebooks')
                 self.notebooks.open_file(path)
             else:
@@ -1236,6 +1257,7 @@ class Studio(QMainWindow):
         except (OSError, UnicodeError) as exc:
             self.error(f'Cannot open file: {exc}')
             return
+        self.leave_plot_document()
         self.settings.setValue('last_file', str(path))
         self.update_analysis()
         self.nav.setCurrentRow(1)
@@ -1295,6 +1317,10 @@ class Studio(QMainWindow):
         if notebook_path and Path(str(notebook_path)).is_file():
             self.notebooks.open_file(Path(str(notebook_path)))
 
+        plot_path = self.settings.value('last_plot_v4', '')
+        if plot_path and Path(str(plot_path)).is_file():
+            self.plot_editor.open_document(Path(str(plot_path)), restoring=True)
+
     def record(self, category, label_text, source, report):
         metrics = report.get('metrics', {})
         details = {'error':report.get('error', ''),
@@ -1307,7 +1333,9 @@ class Studio(QMainWindow):
             self.error(f'History database unavailable: {exc}')
 
     def save_active(self):
-        """Save the currently visible document, not a hidden source tab."""
+        """Save the document most recently used in the workbench."""
+        if self.plot_is_active and not self.plot_dock.isHidden():
+            return self.plot_editor.save_document()
         if self.nav.currentRow() == 8 and hasattr(self, 'notebooks'):
             return self.notebooks.save_file()
         return self.save_file()
@@ -1920,6 +1948,9 @@ class Studio(QMainWindow):
         if not self.documents.confirm_all():
             event.ignore()
             return
+        if not self.plot_editor.confirm_replace():
+            event.ignore()
+            return
         if hasattr(self, 'notebooks') and not self.notebooks.maybe_close():
             event.ignore()
             return
@@ -1931,11 +1962,13 @@ class Studio(QMainWindow):
                     self.error('An active task is still shutting down. Try closing again.')
                     event.ignore()
                     return
+        self.plot_editor.shutdown()
         if self.safe_mode:
             # A diagnostic session must never overwrite a known-good layout.
             startup_mark("Studio.closeEvent: safe mode; saved settings unchanged")
             event.accept()
             return
+        self.settings.setValue('last_plot_v4', str(self.plot_editor.path or ''))
         self.settings.setValue('geometry',self.saveGeometry())
         self.settings.setValue('workspace_pages',self.workspace.open_page_ids())
         self.settings.setValue('open_files',self.documents.open_paths())

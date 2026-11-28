@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "viewport": {
+    "xmin": -2.4,
+    "xmax": 5.4,
+    "ymin": -0.8,
+    "ymax": 3.6
+  },
+  "series": [
+    {
+      "label": "Observations",
+      "color": "#F2AF57",
+      "id": "observations",
+      "visible": true,
+      "points": [
+        [
+          -2,
+          -0.15
+        ],
+        [
+          -1,
+          0.48
+        ],
+        [
+          0,
+          0.92
+        ],
+        [
+          1,
+          1.42
+        ],
+        [
+          2,
+          1.96
+        ],
+        [
+          2,
+          2.12
+        ],
+        [
+          3,
+          2.43
+        ],
+        [
+          4,
+          2.93
+        ],
+        [
+          5,
+          3.41
+        ]
+      ],
+      "kind": "points"
+    },
+    {
+      "label": "Single calibration point",
+      "color": "#88D8A6",
+      "id": "calibration",
+      "visible": false,
+      "points": [
+        [
+          1,
+          1.5
+        ]
+      ],
+      "kind": "points"
+    },
+    {
+      "label": "Distant observation",
+      "color": "#FF827B",
+      "id": "outlier",
+      "visible": false,
+      "points": [
+        [
+          28,
+          -13
+        ]
+      ],
+      "kind": "points"
+    },
+    {
+      "label": "Linear model",
+      "color": "#5AB0FF",
+      "id": "linear",
+      "visible": false,
+      "expression": "a*x+b",
+      "parameters": {
+        "a": 0.5,
+        "b": 1
+      },
+      "kind": "formula"
+    }
+  ]
+}

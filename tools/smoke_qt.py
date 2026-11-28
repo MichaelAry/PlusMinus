@@ -15,7 +15,15 @@ from studio_qt import Studio
 Studio.auto_tests = lambda self: None
 Studio.discover_native = lambda self: None
 
+from tempfile import TemporaryDirectory
+from PySide6.QtCore import QSettings
+
+settings_dir = TemporaryDirectory()
+QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, settings_dir.name)
+
 app = QApplication([])
+QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, settings_dir.name)
 window = Studio()
 window.show()
 app.processEvents()
@@ -196,3 +204,10 @@ window.saved = window.editor.toPlainText()  # No unsaved-edit dialog in a headle
 window.close()
 app.processEvents()
 print('Qt startup, eight analytics views, source split and language navigation: OK')
+
+from plot_qt_checks import run as run_plot_checks
+
+with TemporaryDirectory() as folder:
+    QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope, folder)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, folder)
+    run_plot_checks(Studio, folder, benchmark='--plot-benchmark' in sys.argv)

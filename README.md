@@ -35,6 +35,17 @@ successful tagged build has been published*:
 The executable bundles Python, Qt, psutil and the C++ runner. macOS unsigned binaries
 may require approval in Privacy & Security. Linux bundles depend on a compatible glibc.
 
+## Plot Editor
+
+Open **View → Plot Editor** to graph formulas and point tables together. Formula
+parameters have live sliders and numeric fields. Use the mouse wheel to zoom
+around the cursor, drag to pan, or choose **Fit** to frame visible data. Save your
+series, parameters, colors, and viewport in a `.pmplot` file.
+
+The [ready-to-open plot examples](docs/plot-examples/README.md) cover adjustable
+waves, measurements with repeated X values, discontinuities, formula diagnostics,
+and fitting hidden and visible series.
+
 ## Studio 3.0 features
 
 | Area | Implemented |

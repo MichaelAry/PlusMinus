@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "viewport": {
+    "xmin": -4,
+    "xmax": 4,
+    "ymin": -4,
+    "ymax": 4
+  },
+  "series": [
+    {
+      "label": "Rational curve",
+      "color": "#FF827B",
+      "id": "pole",
+      "visible": true,
+      "expression": "1/(x-0.123)",
+      "parameters": {},
+      "kind": "formula"
+    },
+    {
+      "label": "Parabolic reference",
+      "color": "#5AB0FF",
+      "id": "parabola",
+      "visible": true,
+      "expression": "0.3*pow(x,2)-1",
+      "parameters": {},
+      "kind": "formula"
+    },
+    {
+      "label": "Steep continuous line",
+      "color": "#88D8A6",
+      "id": "steep",
+      "visible": false,
+      "expression": "1000*x",
+      "parameters": {},
+      "kind": "formula"
+    },
+    {
+      "label": "Editable syntax error",
+      "color": "#AB95F5",
+      "id": "draft",
+      "visible": false,
+      "expression": "sin(",
+      "parameters": {},
+      "kind": "formula"
+    }
+  ]
+}
