@@ -40,9 +40,12 @@ node_ready() {
   [[ "$major" =~ ^[0-9]+$ && "$major" -ge 22 ]]
 }
 rust_ready() {
+  local version
   command -v rustc >/dev/null 2>&1 &&
-  command -v cargo >/dev/null 2>&1 &&
-  rustc -vV | grep -q '^host: x86_64-unknown-linux-gnu$'
+  command -v cargo >/dev/null 2>&1 || return 1
+  version="$(rustc -vV)" || return 1
+  grep -Fxq 'host: x86_64-unknown-linux-gnu' <<< "$version" &&
+    cargo --version >/dev/null
 }
 system_ready() {
   command -v cmake >/dev/null 2>&1 &&
@@ -153,4 +156,24 @@ if [[ ! -d "$APP/node_modules" || ! -f "$STAMP" || "$(cat "$STAMP")" != "$packag
 fi
 log 'Launching the complete Tauri + Rust + C++ Studio 5.'
 cd "$APP"
-npm run tauri dev
+dev_port="$(python3 - <<'PY'
+import errno
+import socket
+
+with socket.socket() as listener:
+    try:
+        listener.bind(("127.0.0.1", 1420))
+    except OSError as error:
+        if error.errno != errno.EADDRINUSE:
+            raise
+        listener.bind(("127.0.0.1", 0))
+    print(listener.getsockname()[1])
+PY
+)"
+if [[ "$dev_port" == 1420 ]]; then
+  npm run tauri dev
+else
+  log "Port 1420 is in use. Starting Studio 5 on port $dev_port."
+  npm run tauri -- dev --config \
+    "{\"build\":{\"devUrl\":\"http://127.0.0.1:$dev_port\",\"beforeDevCommand\":\"npm exec -- vite --host 127.0.0.1 --port $dev_port --strictPort\"}}"
+fi
