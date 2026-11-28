@@ -1,6 +1,7 @@
 #pragma once
 #include "plusminus/value.hpp"
 #include "plusminus/bytecode.hpp"
+#include "plusminus/plot.hpp"
 #include <cstddef>
 #include <array>
 #include <atomic>
@@ -51,6 +52,13 @@ public:
     std::atomic<std::uint64_t> traceThreadNext{0};
     std::mutex traceMutex;
     std::vector<TraceEvent> traceEvents;
+
+    // Thread-tagged drawing primitives. Each executeThread() call receives a
+    // stable ordinal, so the renderer can colour one curve per worker.
+    std::mutex plotMutex;
+    std::vector<plusminus::PlotEvent> plotEvents;
+    std::atomic<std::uint64_t> plotThreadNext{0};
+    std::atomic<std::uint64_t> plotDropped{0};
 
     double run(const std::vector<Command>& program);
 

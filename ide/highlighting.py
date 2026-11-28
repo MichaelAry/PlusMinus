@@ -38,7 +38,7 @@ class StatefulHighlighter(QSyntaxHighlighter):
             words = [
                 (r'\b(?:if|else|while|func|proc|return|go|sync|lock|unlock)\b', '#AFC5FF', True),
                 (r'\b(?:int|float|double)\b', '#95B7D5', True),
-                (r'\b(?:print|len|resize|sin|cos|pow|fact|multifact)\b', '#91CDC0', True),
+                (r'\b(?:print|len|resize|plot|point|line|clear|complex|re|im|conj|arg|abs|cabs|sin|cos|tan|asin|acos|atan|atan2|sqrt|cbrt|exp|log|log10|floor|ceil|round|min|max|hypot|clamp|lerp|deg|rad|sign|pow|fact|multifact|pi|e)\b', '#91CDC0', True),
                 (r'\b[A-Za-z_]\w*(?=\s*\()', '#E2C79A', False),
             ]
         for regex, color, bold in words:

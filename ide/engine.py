@@ -36,7 +36,9 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
     """Run the VM. Sampled RSS is not a guaranteed instantaneous peak."""
     start = time.perf_counter()
     cancel = cancel or threading.Event()
-    report = dict(ok=False, output='', result='', variables='', bytecode='', error='', diagnostics=[], trace=[], trace_truncated=False)
+    report = dict(ok=False, output='', result='', variables='', bytecode='', error='',
+                  diagnostics=[], trace=[], trace_truncated=False,
+                  plot=dict(events=[], truncated=False, threads=0))
     metrics = dict(wall_ms=0.0, cpu_ms=None, peak_rss_mb=None,
                    peak_threads=None, samples=[], sample_interval_ms=40)
     process = None
@@ -87,6 +89,8 @@ def execute(path, source, mode='run', timeout=5.0, cancel=None):
             if not isinstance(decoded, dict) or not isinstance(decoded.get('ok'), bool):
                 raise ValueError('Invalid runner report')
             report.update({k: decoded[k] for k in report if k in decoded})
+            if not isinstance(report.get('plot'), dict):
+                report['plot'] = dict(events=[], truncated=False, threads=0)
             if isinstance(decoded.get('metrics'), dict):
                 metrics.update({k: v for k,v in decoded['metrics'].items()
                                 if k in ('compile_ms','execute_ms','program_instructions',

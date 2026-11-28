@@ -12,6 +12,7 @@ add_library(plusminus_core STATIC
     src/vm/vm.cpp
     src/vm/executor.cpp
     src/vm/builtins.cpp
+    src/vm/mathlib.cpp
     src/api.cpp
 )
 target_compile_features(plusminus_core PUBLIC cxx_std_20)
@@ -37,6 +38,12 @@ if(BUILD_TESTING)
     add_executable(plusminus_core_smoke tests/cpp/core_smoke.cpp)
     target_link_libraries(plusminus_core_smoke PRIVATE plusminus_core)
     add_test(NAME core_smoke COMMAND plusminus_core_smoke)
+
+    # Drawer/Math coverage is a standalone smoke test so the original 225
+    # generated TEST_METHOD adapters keep their documented count.
+    add_executable(plusminus_drawer_smoke tests/cpp/drawer_smoke.cpp)
+    target_link_libraries(plusminus_drawer_smoke PRIVATE plusminus_core)
+    add_test(NAME drawer_smoke COMMAND plusminus_drawer_smoke)
 endif()
 
 # Full original C++ test suite: generated cross-platform registration adapters.

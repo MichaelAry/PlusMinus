@@ -32,7 +32,12 @@ def compiler(anchor):
 
 
 def runtime(anchor):
-    path = 'src/vm/builtins.cpp' if 'c.name ==' in anchor else 'src/vm/executor.cpp'
+    if 'c.name ==' in anchor:
+        path = 'src/vm/builtins.cpp'
+    elif 'name ==' in anchor:
+        path = 'src/vm/mathlib.cpp'
+    else:
+        path = 'src/vm/executor.cpp'
     return SourceTarget(path, anchor, 'VM / execution')
 
 
@@ -51,13 +56,22 @@ SYMBOLS = {
     'float': LanguageSymbol('Optional type annotation, stored as a double.', compiler('else if (checkKeyword("float"))')),
     'double': LanguageSymbol('Optional type annotation for a double.', compiler('else if (checkKeyword("double"))')),
     'print': LanguageSymbol('Print values to VM output.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "print")')),
-    'len': LanguageSymbol('Length of an array.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "len")')),
-    'resize': LanguageSymbol('Resize an array.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "resize")')),
-    'sin': LanguageSymbol('Sine built-in.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "sin")')),
-    'cos': LanguageSymbol('Cosine built-in.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "cos")')),
-    'pow': LanguageSymbol('Exponentiation built-in.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "pow")')),
-    'fact': LanguageSymbol('Factorial built-in.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "fact")')),
-    'multifact': LanguageSymbol('Multifactorial built-in.', compiler('void Compiler::parseOperand()'), runtime('else if (c.name == "multifact")')),
+    'len': LanguageSymbol('Length of an array.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "len")')),
+    'resize': LanguageSymbol('Resize an array.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "resize")')),
+    'plot': LanguageSymbol('Append a point to the calling thread\'s curve.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "plot")')),
+    'point': LanguageSymbol('Append an unconnected point.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "point")')),
+    'line': LanguageSymbol('Append a line segment.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "line")')),
+    'clear': LanguageSymbol('Clear captured drawing primitives.', compiler('void Compiler::parseOperand()'), runtime('if (c.name == "clear")')),
+    'complex': LanguageSymbol('Construct a complex value.', compiler('void Compiler::parseOperand()'), runtime('if (name == "complex" || name == "cplx")')),
+    're': LanguageSymbol('Real part of a complex value.', compiler('void Compiler::parseOperand()'), runtime('if (name == "re" || name == "real")')),
+    'im': LanguageSymbol('Imaginary part of a complex value.', compiler('void Compiler::parseOperand()'), runtime('if (name == "im" || name == "imag")')),
+    'abs': LanguageSymbol('Absolute value or complex modulus.', compiler('void Compiler::parseOperand()'), runtime('if (name == "abs" || name == "cabs")')),
+    'sin': LanguageSymbol('Sine built-in.', compiler('void Compiler::parseOperand()'), runtime('if (name == "sin"')),
+    'cos': LanguageSymbol('Cosine built-in.', compiler('void Compiler::parseOperand()'), runtime('if (name == "cos"')),
+    'sqrt': LanguageSymbol('Square root with complex promotion for negative reals.', compiler('void Compiler::parseOperand()'), runtime('if (name == "sqrt")')),
+    'pow': LanguageSymbol('Exponentiation built-in.', compiler('void Compiler::parseOperand()'), runtime('if (name == "pow")')),
+    'fact': LanguageSymbol('Factorial built-in.', compiler('void Compiler::parseOperand()'), runtime('if (name == "fact")')),
+    'multifact': LanguageSymbol('Multifactorial built-in.', compiler('void Compiler::parseOperand()'), runtime('if (name == "multifact")')),
 }
 
 _WORD = re.compile(r'[A-Za-z_][A-Za-z_0-9]*')
@@ -115,7 +129,8 @@ def locate_target(root: Path, target: SourceTarget) -> tuple[Path, int]:
             'include/plusminus/api.hpp',
             'src/compiler/compiler.cpp', 'src/compiler/scanner.cpp',
             'src/compiler/statements.cpp', 'src/compiler/expressions.cpp',
-            'src/vm/vm.cpp', 'src/vm/executor.cpp', 'src/vm/builtins.cpp', 'src/api.cpp',
+            'src/vm/vm.cpp', 'src/vm/executor.cpp', 'src/vm/builtins.cpp',
+            'src/vm/mathlib.cpp', 'src/api.cpp',
         )
     }
     if path not in allowed:

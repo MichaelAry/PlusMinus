@@ -173,6 +173,32 @@ Test Center now has two modes: fast built-in PlusMinus checks and the full origi
 
 The additional Code Analysis workspace displays a zoomable control-flow graph from compiled bytecode (branch targets and fall-through edges) and a heuristic call graph derived from PlusMinus function declarations/calls. Double-click a graph node to navigate to the compiled instruction or function source. Graph rendering caps very large bytecode programs to keep the UI responsive; the source call graph is marked heuristic rather than a full semantic proof. Profile mode (F6) now counts executed opcodes with atomic counters across VM threads, separate from static bytecode counts, and visualizes the dynamic distribution.
 
+## Multithreaded drawing and Math library
+
+The interpreter now exposes thread-tagged drawing primitives: `plot(x, y)`
+adds a point to the calling thread's connected curve, `point(x, y)` adds an
+unconnected dot, `line(x1, y1, x2, y2)` adds a segment, and `clear()` resets
+the buffer. Every event records the VM thread ordinal (main thread `0`,
+workers `1..N`), so a renderer can colour one curve per thread and show the
+actual concurrency of the program.
+
+The one-shot runner returns this data in the new `plot` field of its JSON
+report (`events`, `truncated`, `threads`), alongside the existing `bytecode`
+listing and the thread-aware `trace` events. `report.bytecode` is available
+in every mode; `report.trace` (bounded to 5,000 events) is collected in
+`trace` mode and lets a bytecode view highlight executed instructions per
+thread. The capture is bounded to 50,000 drawing primitives. See
+`docs/PLOT_PROTOCOL.md` for the exact protocol.
+
+`examples/mandelbrot.pm` is the default demonstration: 32 `go row(...)`
+workers draw 160 points each (5,120 events), using complex numbers through
+the new Math library. All non-trivial arithmetic now lives in
+`include/plusminus/math.hpp` / `src/vm/mathlib.cpp`: complex values
+(`complex(re, im)`, `re`, `im`, `conj`, `arg`, `abs`) participate in the
+ordinary `+ - * / ^` operators, and the scalar functions (`sin`, `cos`,
+`sqrt`, `log`, `pow`, `min`, `max`, ...) are provided there instead of being
+scattered through the VM.
+
 ## Git-aware history and regression trends
 
 History & Reports contains separate panes for program runs, C++ testing sessions, and a read-only Git summary. Native session graphs visualize pass percentages and elapsed suite time across runs, while each stored session retains commit SHA, source fingerprint, platform, and per-test verdicts. The Git pane shows branch, dirty working tree, diff summary and recent commits without making changes to the repository. All Git operations are local-only and optional.
