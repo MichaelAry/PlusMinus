@@ -36,7 +36,7 @@ monaco.languages.setMonarchTokensProvider("plusminus", {
     root: [
       [/\/\/.*$/, "comment"],
       [/"(?:[^"\\]|\\.)*"/, "string"],
-      [/\b(?:if|else|while|for|return|func|proc|go|sync|lock|unlock|print)\b/, "keyword"],
+      [/\b(?:if|else|while|for|return|func|proc|go|sync|lock|unlock|print|plot|point|line|clear|complex|re|im|abs|sqrt|sin|cos|tan|min|max|pow|fact|multifact)\b/, "keyword"],
       [/\b\d+(?:\.\d+)?\b/, "number"],
       [/[{}()[\]]/, "@brackets"],
       [/[+\-*/^%=<>!&|]+/, "operator"],

@@ -16,6 +16,14 @@ double VM::run(const std::vector<Command>& program) {
     traceEvents.clear();
     if (traceEnabled) traceEvents.reserve(TraceLimit);
 
+    {
+        std::lock_guard<std::mutex> lock(plotMutex);
+        plotEvents.clear();
+        if (plotEvents.capacity() > plusminus::PlotEventLimit) plotEvents.shrink_to_fit();
+    }
+    plotThreadNext.store(0, std::memory_order_relaxed);
+    plotDropped.store(0, std::memory_order_relaxed);
+
     // PRE-SCAN: регистрируем все функции ДО запуска потоков.
     // Это делает functions read-only во время выполнения -> безопасно без мьютекса.
     for (size_t i = 0; i < program.size(); ++i) {

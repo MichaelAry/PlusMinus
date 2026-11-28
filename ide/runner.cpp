@@ -1,13 +1,17 @@
 #include "Parser.h"
+#include "plusminus/math.hpp"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <vector>
 
 // JSON strings keep source output, diagnostics and inspection data separate.
 static std::string quote(const std::string& s) {
@@ -65,10 +69,49 @@ static std::string variables(const VM& vm) {
             for(size_t i=0; i<std::min<size_t>(a.size(), 200); ++i) { if(i) s << ", "; s << number(a[i]); }
             if(a.size()>200) s << ", ... (" << a.size() << " entries)";
             s << ']';
-        } else if (v.isString()) s << quote(v.str);
+        } else if (v.isComplex()) s << plusminus::math::formatComplex(v.getComplex());
+        else if (v.isString()) s << quote(v.str);
         else s << number(v.getNum());
         s << '\n';
     }
+    return s.str();
+}
+
+static const char* plotKind(plusminus::PlotKind kind) {
+    switch (kind) {
+        case plusminus::PlotKind::Point: return "point";
+        case plusminus::PlotKind::Dot: return "dot";
+        case plusminus::PlotKind::Line: return "line";
+    }
+    return "point";
+}
+
+// JSON cannot represent NaN/Inf. A plotting program that produces a
+// non-finite coordinate gets a finite 0 instead of an invalid document; the
+// renderer can still show the remaining curves.
+static std::string plotNumber(double value) {
+    return std::isfinite(value) ? number(value) : std::string("0");
+}
+
+static std::string plotData(const std::vector<plusminus::PlotEvent>& events,
+                            bool truncated, std::uint64_t threads) {
+    std::ostringstream s;
+    s << "{\"events\":[";
+    bool first = true;
+    for (const auto& event : events) {
+        if (!first) s << ',';
+        first = false;
+        s << "{\"thread\":" << event.thread
+          << ",\"kind\":\"" << plotKind(event.kind) << "\""
+          << ",\"x\":" << plotNumber(event.x)
+          << ",\"y\":" << plotNumber(event.y);
+        if (event.kind == plusminus::PlotKind::Line)
+            s << ",\"x2\":" << plotNumber(event.x2)
+              << ",\"y2\":" << plotNumber(event.y2);
+        s << '}';
+    }
+    s << "],\"truncated\":" << (truncated ? "true" : "false")
+      << ",\"threads\":" << threads << "}";
     return s.str();
 }
 int main(int argc, char** argv) {
@@ -85,6 +128,9 @@ int main(int argc, char** argv) {
     std::string capturedTrace = "[]";
     bool truncatedTrace = false;
     std::uint64_t executedInstructions = 0;
+    std::vector<plusminus::PlotEvent> capturedPlots;
+    bool truncatedPlots = false;
+    std::uint64_t plotThreads = 0;
     try {
         auto compilationStart = Clock::now();
         auto program = compileToCommands(source);
@@ -101,11 +147,23 @@ int main(int argc, char** argv) {
             catch (...) {
                 executeMs = std::chrono::duration<double, std::milli>(Clock::now() - executionStart).count();
                 output = vm.output;
+                {
+                    std::lock_guard<std::mutex> lock(vm.plotMutex);
+                    capturedPlots = vm.plotEvents;
+                }
+                truncatedPlots = vm.plotDropped.load(std::memory_order_relaxed) > 0;
+                plotThreads = vm.plotThreadNext.load(std::memory_order_relaxed);
                 throw;
             }
             executeMs = std::chrono::duration<double, std::milli>(Clock::now() - executionStart).count();
             output = vm.output;
             vars = variables(vm);
+            {
+                std::lock_guard<std::mutex> lock(vm.plotMutex);
+                capturedPlots = vm.plotEvents;
+            }
+            truncatedPlots = vm.plotDropped.load(std::memory_order_relaxed) > 0;
+            plotThreads = vm.plotThreadNext.load(std::memory_order_relaxed);
             if (vm.profileEnabled) {
                 std::ostringstream counts;
                 counts << "{";
@@ -156,6 +214,7 @@ int main(int argc, char** argv) {
     std::cout << "{\"ok\":" << (error.empty() ? "true" : "false")
         << ",\"output\":" << quote(output) << ",\"result\":" << quote(result)
         << ",\"variables\":" << quote(vars) << ",\"bytecode\":" << quote(code)
+        << ",\"plot\":" << plotData(capturedPlots, truncatedPlots, plotThreads)
         << ",\"error\":" << quote(error)
         << ",\"diagnostics\":" << diagnostic.str()
         << ",\"trace\":" << capturedTrace

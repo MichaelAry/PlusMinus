@@ -2,7 +2,13 @@
 // No unsupported language syntax or external language server is implied.
 export const plusminusKeywords=[
   "if","else","while","func","proc","return","go","sync","lock","unlock",
-  "int","float","double","print","len","resize","sin","cos","pow","fact","multifact",
+  "int","float","double","print","len","resize",
+  "plot","point","line","clear",
+  "complex","re","im","conj","arg","abs","cabs",
+  "sin","cos","tan","asin","acos","atan","atan2",
+  "sqrt","cbrt","exp","log","log10","floor","ceil","round",
+  "min","max","hypot","clamp","lerp","deg","rad","sign",
+  "pow","fact","multifact","pi","e",
 ] as const;
 export function completionCandidates(source:string,prefix:string,limit=100):string[] {
   const partial=source.slice(0,160_000);

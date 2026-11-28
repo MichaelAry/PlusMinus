@@ -1,6 +1,7 @@
 #include "plusminus/api.hpp"
 #include "plusminus/compiler.hpp"
 #include "plusminus/vm.hpp"
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -22,7 +23,7 @@ std::unordered_map<std::string, double> runAndGetVars(const std::string& input) 
     Compiler c(input); auto p = c.compile(); VM vm; vm.run(p);
     std::unordered_map<std::string, double> result;
     for (auto& [k, v] : vm.vars) {
-        if (!v.isArray()) result[k] = v.getNum();
+        if (!v.isArray() && !v.isComplex()) result[k] = v.getNum();
     }
     return result;
 }
@@ -40,4 +41,13 @@ std::string getOutput(const std::string& input) {
     VM vm;
     vm.run(p);
     return vm.output;
+}
+
+std::vector<plusminus::PlotEvent> getPlots(const std::string& input) {
+    Compiler c(input);
+    auto p = c.compile();
+    VM vm;
+    vm.run(p);
+    std::lock_guard<std::mutex> lock(vm.plotMutex);
+    return vm.plotEvents;
 }

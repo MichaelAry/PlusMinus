@@ -1,7 +1,6 @@
 #include "plusminus/vm.hpp"
 #include "builtins.hpp"
-#include <cmath>
-#include <functional>
+#include "plusminus/math.hpp"
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -18,21 +17,29 @@ double VM::executeThread(const std::vector<Command>& program, size_t startIp,
     std::vector<Frame> localStack = std::move(initialFrames);
     size_t ip = startIp;
     const std::uint64_t traceThread = traceEnabled ? traceThreadNext.fetch_add(1, std::memory_order_relaxed) : 0;
+    // Stable per-thread ordinal for plot events, independent of whether the
+    // bounded trace is enabled. The main VM thread is 0.
+    const std::uint64_t plotThread = plotThreadNext.fetch_add(1, std::memory_order_relaxed);
 
-    auto popNum = [&]() {
+    auto popValue = [&]() -> Value {
         if (stack.empty()) throw std::runtime_error("Stack underflow");
         Value v = stack.back(); stack.pop_back();
+        return v;
+        };
+
+    auto popNum = [&]() {
+        Value v = popValue();
         if (v.isArray()) throw std::runtime_error("Expected number, got array");
+        if (v.isString()) throw std::runtime_error("Expected number, got string");
+        if (v.isComplex()) throw std::runtime_error("Expected real number, got complex number");
         return v.getNum();
         };
 
-    auto binOp = [&](std::vector<Value>& st, std::function<double(double, double)> f) {
+    auto binOp = [&](std::vector<Value>& st, Value (*op)(const Value&, const Value&)) {
         if (st.size() < 2) throw std::runtime_error("Stack underflow");
-        if (st.back().isArray() || st[st.size() - 2].isArray())
-            throw std::runtime_error("Cannot perform arithmetic on an array");
-        double b = st.back().getNum(); st.pop_back();
-        double a = st.back().getNum(); st.pop_back();
-        st.push_back(Value(f(a, b)));
+        Value b = st.back(); st.pop_back();
+        Value a = st.back(); st.pop_back();
+        st.push_back(op(a, b));
         };
 
     while (ip < program.size()) {
@@ -124,18 +131,25 @@ double VM::executeThread(const std::vector<Command>& program, size_t startIp,
             arr->at((size_t)idx) = val; break;
         }
 
-        case OpCode::Add:  binOp(stack, [](double a, double b) { return a + b; }); break;
-        case OpCode::Sub:  binOp(stack, [](double a, double b) { return a - b; }); break;
-        case OpCode::Mul:  binOp(stack, [](double a, double b) { return a * b; }); break;
-        case OpCode::Div:  binOp(stack, [](double a, double b) { return a / b; }); break;
-        case OpCode::Mod:  binOp(stack, [](double a, double b) { return std::fmod(a, b); }); break;
-        case OpCode::Pow:  binOp(stack, [](double a, double b) { return std::pow(a, b); }); break;
-        case OpCode::Less: binOp(stack, [](double a, double b) { return a < b ? 1.0 : 0.0; }); break;
-        case OpCode::Greater: binOp(stack, [](double a, double b) { return a > b ? 1.0 : 0.0; }); break;
-        case OpCode::And:  binOp(stack, [](double a, double b) { return (a != 0.0 && b != 0.0) ? 1.0 : 0.0; }); break;
+        case OpCode::Add:  binOp(stack, plusminus::math::add); break;
+        case OpCode::Sub:  binOp(stack, plusminus::math::subtract); break;
+        case OpCode::Mul:  binOp(stack, plusminus::math::multiply); break;
+        case OpCode::Div:  binOp(stack, plusminus::math::divide); break;
+        case OpCode::Mod:  binOp(stack, plusminus::math::remainder); break;
+        case OpCode::Pow:  binOp(stack, plusminus::math::power); break;
+        case OpCode::Less: binOp(stack, plusminus::math::less); break;
+        case OpCode::Greater: binOp(stack, plusminus::math::greater); break;
+        case OpCode::And: {
+            Value b = popValue();
+            Value a = popValue();
+            stack.push_back(Value(plusminus::math::truthy(a) && plusminus::math::truthy(b) ? 1.0 : 0.0));
+            break;
+        }
 
         case OpCode::Call: {
-            if (executeBuiltin(c, stack, output, outputMutex)) {
+            BuiltinContext context{&output, &outputMutex, &plotEvents, &plotMutex,
+                                   &plotDropped, plotThread};
+            if (executeBuiltin(c, stack, context)) {
                 break;
             }
             else if (functions.count(c.name)) {
@@ -247,7 +261,11 @@ double VM::executeThread(const std::vector<Command>& program, size_t startIp,
         }
 
         case OpCode::Jmp: ip = (size_t)c.target; continue;
-        case OpCode::Jz:  if (popNum() == 0.0) { ip = (size_t)c.target; continue; } break;
+        case OpCode::Jz: {
+            Value condition = popValue();
+            if (!plusminus::math::truthy(condition)) { ip = (size_t)c.target; continue; }
+            break;
+        }
         case OpCode::Pop: if (!stack.empty()) stack.pop_back(); break;
         case OpCode::Halt:
             syncAllThreads(); // ждём все потоки перед выходом
